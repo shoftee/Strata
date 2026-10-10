@@ -9,8 +9,9 @@ Tools from MCP servers (serve/mcp.py, `"mcp_servers"` in the config or --mcp-con
 ask for them with `"strata_mcp": true` - the web app does; other clients see exactly the API they always saw.
 Images (optional, when the config has a "vision" entry): OpenAI image_url parts and Anthropic image blocks (base64
 data, http(s) URLs or local file paths) go through `strata-vision` (the model's mmproj file) and reach the engine as
-embeddings (`GENI`).  JPEG/PNG/BMP/GIF go straight in; WebP, TIFF, AVIF, ... (agents like omp send WebP) are
-converted to PNG first with Pillow.
+embeddings (`GENI`).  An http(s) URL must resolve to a public address, checked again on every redirect (_require_public),
+so a request cannot use the server to reach what only this computer can.  JPEG/PNG/BMP/GIF go straight in; WebP, TIFF,
+AVIF, ... (agents like omp send WebP) are converted to PNG first with Pillow.
 Requests whose prompt plus max tokens exceed the engine's context are REJECTED with 400, never truncated.
 An unset (or 0, or -1) max tokens means "unlimited": whatever the prompt leaves of the context.
 
@@ -37,7 +38,9 @@ import select
 import signal
 import socket
 import struct
+import ipaddress
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -1782,6 +1785,57 @@ class StrataEngine:
 IMAGE_URL_MAX = 32 << 20        # an image URL is read up to this (the web app attaches pictures of up to 20 MB)
 
 
+def _public_addresses(host: str) -> list[str]:
+    """host's IP addresses, or [] when it does not resolve.  A name that is already an address is that address."""
+    try:
+        ipaddress.ip_address(host)
+        return [host]
+    except ValueError:
+        pass
+    try:
+        return sorted({i[4][0] for i in socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)})
+    except (OSError, UnicodeError):
+        return []
+
+
+def _require_public(url: str) -> None:
+    """Refuse a URL that does not lead to a public host.  An image URL comes from the request, so without this the
+    server fetches whatever it is pointed at on this machine's behalf and hands the bytes back: the link-local
+    metadata address a cloud instance keeps its credentials on, a service on localhost, a host on the LAN."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise ValueError("only an http or https image URL is fetched")
+    host = parts.hostname
+    if not host:
+        raise ValueError("that image URL has no host")
+    addresses = _public_addresses(host)
+    if not addresses:
+        raise ValueError(f"the host of that image URL does not resolve ({host})")
+    if not all(_is_global(a) for a in addresses):
+        # every address is checked: a name that resolves to one public and one private address must not pass on the
+        # public one, or a later fetch (or a redirect) would reach the private address anyway
+        raise ValueError(f"that image URL points at {host}, which is not a public address; an image URL must be "
+                         "fetchable from the internet")
+
+
+class _PublicRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Checks every hop.  urllib follows redirects by itself and re-resolves each one, so a URL that passed on the
+    first hop would still reach a private address through a 302; this is asked before each new request is built."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _require_public(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _is_global(address: str) -> bool:
+    """A routable, public address.  Loopback, link-local (169.254.0.0/16, the cloud metadata address), the private
+    ranges and the IPv6 unique-local ones are all refused, as is anything Python does not consider global."""
+    try:
+        return ipaddress.ip_address(address).is_global
+    except ValueError:
+        return False
+
+
 def network_path(path: str) -> bool:
     r"""A path to another computer: \\host\share or //host/share (either slash), \\?\UNC\host\..., \\.\UNC\host\...
     or the NT form \??\UNC\host\...  Windows connects to that host at the first look at the path (os.path.isfile is
@@ -1943,23 +1997,30 @@ class Vision:
         if path and os.path.isfile(path):
             try:
                 return Path(path).read_bytes()
-            except OSError as e:
-                raise ValueError(f"the image could not be read from {path} ({e})") from None
-        raise ValueError("an image must be a data: URL, an http(s) URL or a local file path")
+            except OSError:
+                # a directory, or a file this user cannot read: say what a file that is not there says, or the two
+                # answers differ and a caller can tell which paths exist on this computer (#audit)
+                pass
+        raise ValueError("the image file could not be read")
 
     @staticmethod
     def download(url: str) -> bytes:
         """An image URL's bytes, at most IMAGE_URL_MAX of them: the whole response was read, so a huge or endless one
-        filled the memory.  One that cannot be read is a ValueError (a 400 that says so), not a dropped connection."""
+        filled the memory.  One that cannot be read is a ValueError (a 400 that says so), not a dropped connection.
+        The host must be public, and that is checked again on every redirect (see _require_public)."""
         too_big = f"the image URL's file is over {IMAGE_URL_MAX >> 20} MiB"
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "strata"}), timeout=60) as r:
+            _require_public(url)
+            opener = urllib.request.build_opener(_PublicRedirectHandler())
+            with opener.open(urllib.request.Request(url, headers={"User-Agent": "strata"}), timeout=60) as r:
                 size = r.headers.get("Content-Length") or ""
                 if size.isdigit() and int(size) > IMAGE_URL_MAX:
                     raise ValueError(too_big)
                 data = r.read(IMAGE_URL_MAX + 1)
         except (OSError, HTTPException) as e:
             raise ValueError(f"the image URL could not be read: {e}") from None
+        except ValueError:
+            raise
         if len(data) > IMAGE_URL_MAX:
             raise ValueError(too_big)
         return data

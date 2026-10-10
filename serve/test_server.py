@@ -4165,8 +4165,45 @@ class ImageSources(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "x.png"
             f.write_bytes(b"x")
-            with mock.patch.object(Path, "read_bytes", side_effect=PermissionError("denied")),                     self.assertRaisesRegex(ValueError, "could not be read from"):
+            with mock.patch.object(Path, "read_bytes", side_effect=PermissionError("denied")),                     self.assertRaisesRegex(ValueError, "image file could not be read"):
                 Vision.load(str(f))
+
+    def test_a_missing_file_answers_like_an_unreadable_one(self):
+        """#audit: the two must not differ.  A caller who can tell "not there" from "there but not an image" can map
+        this computer's filesystem one path at a time, which is all the file read is otherwise refused for."""
+        from serve.server import Vision
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "x.png"
+            f.write_bytes(b"x")
+            gone, denied = None, None
+            try:
+                Vision.load(str(Path(d) / "no-such-file.png"))
+            except ValueError as e:
+                gone = str(e)
+            with mock.patch.object(Path, "read_bytes", side_effect=PermissionError("denied")):
+                try:
+                    Vision.load(str(f))
+                except ValueError as e:
+                    denied = str(e)
+        self.assertIsNotNone(gone)
+        self.assertEqual(gone, denied)
+
+    def test_only_public_image_urls_are_fetched(self):
+        """#audit: the URL is the caller's, so without this the server fetches it on request and returns the bytes -
+        the link-local metadata address, a service on localhost, a host on the LAN.  Redirects are checked too."""
+        from serve.server import _require_public, _is_global, _PublicRedirectHandler
+        for bad in ("http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:8081/v1/models",
+                    "http://localhost:8081/", "http://10.0.0.5/x.png", "http://192.168.1.1/x.png",
+                    "http://[::1]/x.png", "file:///etc/hostname"):
+            with self.subTest(url=bad), self.assertRaisesRegex(ValueError, "not a public address|no host|http or https"):
+                _require_public(bad)
+        for good in ("https://example.com/a.png", "http://8.8.8.8/a.png"):
+            with self.subTest(url=good):
+                _require_public(good)
+        self.assertTrue(_is_global("8.8.8.8"))
+        self.assertFalse(_is_global("169.254.169.254"))
+        self.assertFalse(_is_global("100.64.0.1"))          # carrier-grade NAT: not global either
+        self.assertTrue(issubclass(_PublicRedirectHandler, urllib.request.HTTPRedirectHandler))
 
     def test_a_url_is_read_up_to_the_cap(self):
         import http.server
@@ -4194,7 +4231,9 @@ class ImageSources(unittest.TestCase):
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         try:
-            with mock.patch.object(server, "IMAGE_URL_MAX", 1000):
+            # this test is about the size cap, not about who may be fetched: the test server is on loopback, which
+            # _require_public refuses on purpose, so that check is stood down here (it has its own test above)
+            with mock.patch.object(server, "_require_public"), mock.patch.object(server, "IMAGE_URL_MAX", 1000):
                 for q in ("", "?length"):
                     with self.subTest(q=q):
                         self.assertEqual(server.Vision.load(base + "/small" + q), b"x" * 100)
