@@ -14,6 +14,7 @@ project(strata_vision C CXX)
 
 set(LLAMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/llama.cpp" CACHE PATH "llama.cpp checkout")
 option(STRATA_VISION_CUDA "run the vision encoder on the GPU (builds ggml-cuda)" OFF)
+option(STRATA_VISION_HIP "run the vision encoder on an AMD GPU (builds ggml-cuda as HIP, needs ROCm)" OFF)
 option(STRATA_PORTABLE "build for other PCs: AVX2 baseline, static MSVC runtime" ON)
 if(STRATA_PORTABLE AND MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
@@ -52,8 +53,22 @@ else()
 endif()
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 set(GGML_CUDA ${STRATA_VISION_CUDA} CACHE BOOL "" FORCE)
+set(GGML_HIP ${STRATA_VISION_HIP} CACHE BOOL "" FORCE)
+
+if(STRATA_VISION_HIP)
+  # CMake's HIP language has no default -O flags, so a Release build compiled the device code at -O0; on gfx10+
+  # that trips ROCm#5826 (the ockl workgroup-reduction wrappers keep DPP wavefront shifts an RDNA3.5 verifier
+  # rejects, __syncthreads_or in mmf.cuh).  -O3 optimizes those branches away, as the engine's HIP build does.
+  set(CMAKE_HIP_FLAGS_RELEASE "-O3 -DNDEBUG" CACHE STRING "HIP device code, Release" FORCE)
+endif()
 
 add_subdirectory(${LLAMA_DIR} llama EXCLUDE_FROM_ALL)
+
+if(STRATA_VISION_HIP)
+  # ggml-hip compiles ggml-cuda's .cu files with CMake's HIP language; ROCm's clang still reads a .cu as CUDA
+  # and refuses --offload-arch=gfx..., so say HIP explicitly (the engine's own HIP code is .cpp, which it gets right)
+  target_compile_options(ggml-hip PRIVATE -x hip)
+endif()
 
 add_executable(strata-vision strata_vision.cpp)
 target_link_libraries(strata-vision PRIVATE mtmd llama)
