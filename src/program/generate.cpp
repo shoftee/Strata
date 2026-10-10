@@ -91,6 +91,10 @@
 #else
 #include <unistd.h>
 #include <cerrno>
+#include <csignal>
+#if defined(__linux__)
+#include <execinfo.h>
+#endif
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #endif
@@ -1732,6 +1736,30 @@ int main(int argc, char** argv) {
     // pipe or a file is block-buffered, so a program that dies loses every line it had already printed - which
     // turns "it crashed at step 7" into "it crashed somewhere", and the difference is a debugging session.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+#if defined(__linux__)
+    // A hardening assert (operator[], .at()) or a segfault aborts the process; on a host with tens of GB of RSS
+    // the core is truncated by systemd-coredump's size cap and its stacks are lost, so the log would carry only
+    // the assert's own line - not where it was called from.  Print the call chain to stderr first, then let the
+    // default handler run (the core is still written).  backtrace_symbols_fd writes to fd 2 without malloc'ing
+    // after the first frame's name lookup; addresses without names resolve later with addr2line.
+    static void (*crash_handler)(int) = [](int sig) {
+        static volatile int done = 0;
+        if (__sync_bool_compare_and_swap(&done, 0, 1)) {
+            static const char msg[] = "strata: fatal signal - backtrace of the thread that died:\n";
+            (void)!write(2, msg, sizeof msg - 1);
+            void* frames[128];
+            const int n = backtrace(frames, 128);
+            backtrace_symbols_fd(frames, n, 2);
+        }
+        for (const int s : {SIGABRT, SIGSEGV, SIGFPE, SIGILL}) signal(s, SIG_DFL);
+        raise(sig);
+    };
+    static void (*const old_abrt)(int) = signal(SIGABRT, crash_handler);
+    static void (*const old_segv)(int) = signal(SIGSEGV, crash_handler);
+    static void (*const old_fpe)(int) = signal(SIGFPE, crash_handler);
+    static void (*const old_ill)(int) = signal(SIGILL, crash_handler);
+    (void) old_abrt; (void) old_segv; (void) old_fpe; (void) old_ill;
+#endif
     // `strata --version` / `-V` (also `strata generate --version`): the version and nothing else, before any GPU is touched
     for (int i = 1; i < argc && i < 3; ++i) {
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-V") == 0) {

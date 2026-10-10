@@ -4675,7 +4675,10 @@ void ArenaExpertSource::prefetch(int64_t layer, int64_t expert) {
 #if defined(_WIN32)
     (void) layer; (void) expert;
 #else
-    if (map_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_) return;
+    // the layer's upper bound too: blob_offset() indexes the layout's per-layer table, and a layer at or past
+    // n_layers (a draft layer, a stale index) would read offset[n_layers] out of range
+    if (map_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_ ||
+        (n_expert_ > 0 && layer >= blobs_ / n_expert_)) return;
     const auto& lay = strata::kernels::cpu::expert_layout();
     const uint64_t off = lay.blob_offset(layer, expert) & ~(uint64_t) 4095;
     const uint64_t end = lay.blob_offset(layer, expert) + lay.blob_bytes(layer);
@@ -4694,7 +4697,8 @@ uint64_t ArenaExpertSource::release(int64_t layer, int64_t expert) {
     (void) layer; (void) expert;
     return 0;
 #else
-    if (map_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_) return 0;
+    if (map_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_ ||
+        (n_expert_ > 0 && layer >= blobs_ / n_expert_)) return 0;
     const auto& lay = strata::kernels::cpu::expert_layout();
     const uint64_t off = (lay.blob_offset(layer, expert) + 4095) & ~(uint64_t) 4095;
     const uint64_t end = (lay.blob_offset(layer, expert) + lay.blob_bytes(layer)) & ~(uint64_t) 4095;
@@ -4705,7 +4709,8 @@ uint64_t ArenaExpertSource::release(int64_t layer, int64_t expert) {
 }
 
 bool ArenaExpertSource::pinned(int64_t layer, int64_t expert) const {
-    if (base_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_) return false;
+    if (base_ == nullptr || layer < 0 || expert < 0 || expert >= n_expert_ ||
+        (n_expert_ > 0 && layer >= blobs_ / n_expert_)) return false;
     const auto& lay = strata::kernels::cpu::expert_layout();
     return lay.blob_offset(layer, expert) + lay.blob_bytes(layer) <= pinned_bytes_;
 }
