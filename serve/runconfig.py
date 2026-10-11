@@ -162,12 +162,15 @@ def apply(cfg: dict, changes: dict) -> tuple[dict, list[str]]:
 
 
 def save(path: str | Path, cfg: dict) -> Path:
-    """The config written whole (a temporary file moved over the old one), the earlier one kept as <name>.bak."""
+    """The config written whole (a temporary file moved over the old one), the earlier one kept as <name>.bak.
+    Both are 0600: the file holds the API key."""
     path = Path(path)
     bak = path.with_name(path.name + ".bak")
     shutil.copyfile(path, bak)
+    os.chmod(bak, 0o600)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(cfg, indent=1), encoding="utf-8")
+    os.chmod(tmp, 0o600)
     os.replace(tmp, path)
     return bak
 
