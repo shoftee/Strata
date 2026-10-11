@@ -954,6 +954,9 @@ in a bounded 8 GiB host-RAM cache. This preserves controller/worker histories wh
 their requests alternate; it does not execute requests concurrently. No client session
 ID is required: only exact token/image prefixes with matching steering mode are reused.
 The default budget is 0 (disabled); `--prompt-cache 0` also disables parking.
+On a GPU that shares system RAM (an AMD APU or iGPU), the budget is also held back from the auto expert cache at
+start, so the `--vram-reserve-mib` figure is still free after parking; the start line says so, and `--expert-cache N`
+sizes the cache by hand.
 With `--layer-split`, a parked conversation holds one image per stage (each later stage's
 session and its share of the conversation checkpoints), every image is validated before
 anything is overwritten, and each is restored on its own GPU. Verified on a 4-GPU split:
