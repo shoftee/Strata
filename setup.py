@@ -2960,6 +2960,32 @@ def rollback_engine(toolkit=13) -> int:
     return 0
 
 
+def restamp_engine(toolkit=13) -> int:
+    """`setup.py --restamp`: an engine folder whose binary was replaced by hand (a manual build copied in) gets its
+    BUILD.json rewritten from the source tree this folder holds: the src/vision_src fingerprints and the version are
+    recomputed, and what the stamp says about the build itself (backend, source, archs, lib_dirs, vision) is kept as
+    it is.  Without this, the next setup run reads the stale fingerprint and compiles the engine again (issue #31)."""
+    eng = engine_dir(toolkit)
+    if not (eng / EXE).exists():
+        warn(f"no engine in {eng}: a stamp describes an installed engine")
+        return 1
+    stamp = eng / "BUILD.json"
+    try:
+        meta = json.loads(stamp.read_text(encoding="utf-8")) if stamp.exists() else {}
+    except ValueError:
+        meta = {}
+    was = dict(meta)
+    meta["src"] = source_hash(ENGINE_SOURCES)
+    if (eng / VEXE).exists():
+        meta["vision_src"] = source_hash(VISION_SOURCES)
+    meta["version"] = source_version()
+    stamp.write_text(json.dumps(meta, indent=1))
+    changed = [k for k in ("src", "vision_src", "version") if meta.get(k) != was.get(k)]
+    ok("engine/BUILD.json restamped"
+       + (f": {' and '.join(changed)} updated" if changed else " (the stamp already matched this source tree)"))
+    return 0
+
+
 def get_prebuilt(url_base, gpu, vision, updating=False, toolkit=13) -> Path | None:
     """The ready-made engine in engine/ (kept between runs), or None when there is none for this PC.
     updating: called to replace an installed engine, which starts instead when this fails (no compile).
@@ -4844,6 +4870,8 @@ def main() -> int:
                          "starting the model (UPDATE.bat / update.sh run it after a git pull)")
     ap.add_argument("--rollback-engine", action="store_true",
                     help="put back the engine an update replaced (kept in engine/.previous), and keep the current one there")
+    ap.add_argument("--restamp", action="store_true",
+                    help="rewrite engine/BUILD.json from this source tree, after replacing the engine binary by hand")
     ap.add_argument("--build", action="store_true", help="compile the engine instead of using the ready-made one")
     ap.add_argument("--source", choices=SOURCES, default=None,
                     help="where the model files come from: auto (default: Hugging Face), huggingface or modelscope "
@@ -4920,6 +4948,8 @@ def main() -> int:
 
     if a.rollback_engine:                              # #670
         return rollback_engine(12 if a.cuda == "12" else 13)
+    if a.restamp:                                      # a hand-swapped engine: make its stamp true again
+        return restamp_engine(12 if a.cuda == "12" else 13)
 
     # ---- 0. already installed: just start it
     have = installed_configs()
