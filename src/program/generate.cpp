@@ -1502,8 +1502,13 @@ bool load_control_vectors(const Options& o, const strata::core::ModelGeometry& g
                 if (t.name.rfind("direction.", 0) != 0) continue;
                 const long l = std::strtol(t.name.c_str() + 10, nullptr, 10);
                 if (l < 1 || l >= L) continue;   // layer 0 has no vector; past the model is ignored, as in llama.cpp
-                if (t.type != 0 || t.elements() != (uint64_t) N) {
-                    err = path + ": " + t.name + " must be " + std::to_string((long long) N) + " f32";
+                // elements() wraps: {N, 2^55+1} reads as exactly N.  tensor_payload_bytes() checks for that, and the
+                // span keeps tensor_data() inside the mapping.
+                const uint64_t bytes = strata::tensor_payload_bytes(t);
+                const uint64_t span = f.file_size() > f.data_start() ? f.file_size() - f.data_start() : 0;
+                if (t.type != 0 || bytes != (uint64_t) N * 4 || t.offset > span || bytes > span - t.offset) {
+                    err = path + ": " + t.name + " must be " + std::to_string((long long) N) +
+                          " f32 inside the file";
                     return false;
                 }
                 const float* src = reinterpret_cast<const float*>(f.tensor_data(t));
@@ -10126,13 +10131,23 @@ int main(int argc, char** argv) {
             }
             std::vector<int64_t> ids;
             std::string pe;
-            if (max_new < 1 || endp == nullptr || (geni && emb_path.empty()) || !parse_i64_list(endp, ids, pe)) {
+            // bounded here so the context check below cannot wrap
+            if (max_new < 1 || max_new > o.max_context || endp == nullptr || (geni && emb_path.empty())
+                || !parse_i64_list(endp, ids, pe)) {
                 std::printf("ERR bad request: %s\n", pe.empty() ? "max_new" : pe.c_str());
                 continue;
             }
             const int64_t n = (int64_t) ids.size();
             req_imgs.clear();
             if (geni && !o.vision) { std::printf("ERR this engine was started without --vision\n"); continue; }
+            if (n + max_new + 8 > o.max_context) {
+                std::printf("ERR prompt (%lld tokens) + max_new (%lld) exceeds the context (%lld)\n", (long long) n,
+                            (long long) max_new, (long long) o.max_context);
+                continue;
+            }
+            bool bad = false;
+            for (int64_t t : ids) bad = bad || t < 0 || t >= n_vocab;
+            if (bad) { std::printf("ERR a token id is outside the vocabulary\n"); continue; }
             if (geni || !mrope_identity) {
                 // positions for every cell this request can reach; the identity again for a text request
                 std::string ve;
@@ -10223,14 +10238,6 @@ int main(int argc, char** argv) {
                 mrope_identity = !geni;
             }
             sp.embd_rows = geni ? row_ptr.data() : nullptr;
-            if (n + max_new + 8 > o.max_context) {
-                std::printf("ERR prompt (%lld tokens) + max_new (%lld) exceeds the context (%lld)\n", (long long) n,
-                            (long long) max_new, (long long) o.max_context);
-                continue;
-            }
-            bool bad = false;
-            for (int64_t t : ids) bad = bad || t < 0 || t >= n_vocab;
-            if (bad) { std::printf("ERR a token id is outside the vocabulary\n"); continue; }
             std::array<int64_t, 3> remote_before{};
             std::array<int64_t, 3> launches_before{};
             std::array<uint64_t, 3> compact_before{}, full_before{};
