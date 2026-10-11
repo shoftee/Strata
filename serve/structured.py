@@ -8,6 +8,7 @@ json_schema is checked against its schema when the package is installed - withou
 JSON object, and the server says so once.
 """
 import json
+import os
 import threading
 
 
@@ -80,6 +81,99 @@ def _only_objects(node, root, refs=()):
     return isinstance(branches, list) and any(_only_objects(b, root, refs) for b in branches)
 
 
+# a quantifier inside a quantifier ("(a+)+$") makes one match exponential in the text it fails on, and nothing in re
+# bounds that; the shape is refused when the schema is checked.  STRATA_SAFE_SCHEMA_PATTERNS=0 accepts it anyway.
+
+try:                                            # re's own parser, so the shape is read rather than guessed at
+    from re import _parser as _re_parser
+except ImportError:                             # Python 3.10
+    try:
+        import sre_parse as _re_parser
+    except ImportError:
+        _re_parser = None
+
+_REPEATS = (_re_parser.MAX_REPEAT, _re_parser.MIN_REPEAT) if _re_parser else ()
+_UNBOUNDED = _re_parser.MAXREPEAT if _re_parser else 0
+
+
+def _nested_quantifier(pattern: str) -> bool:
+    """True when `pattern` can take exponential time: a quantifier that can repeat without bound, holding another
+    quantifier that can repeat at all - "(a+)+", "(\\w+\\s?)*", "([a-z]+)+".  A bounded outer repeat such as
+    "(a+){2,3}" is only polynomial and is left alone, and so is an overlapping alternation with no quantifier inside
+    it ("(a|aa)+"), which is slower but rarer in a schema.  A pattern that passes is therefore not proved fast; what
+    this catches is the shape that turns one request into a core that never comes back."""
+    if _re_parser is None:
+        return False
+    try:
+        tree = _re_parser.parse(pattern)
+    except Exception:                            # noqa: BLE001 - check_schema has already refused what re cannot compile
+        return False
+    return _inside_unbounded_repeat(tree)
+
+
+def _parts(node):
+    """The children of a parse-tree node.  re's SubPattern is iterable the old way - by __getitem__, with no
+    __iter__ - so it is asked to iterate rather than tested for being a list; the literals and positions inside the
+    tree are plain ints, which are not iterable at all."""
+    if isinstance(node, (str, bytes, int, float)):
+        return ()
+    try:
+        return tuple(node)
+    except TypeError:                         # a leaf: an int, a flag, a position
+        return ()
+
+
+def _inside_unbounded_repeat(node, inside: bool = False) -> bool:
+    """Walks re's own parse tree.  `inside` is set once we are below a repeat with no upper bound; a second repeat
+    under it is the exponential shape.  A repeat is a (kind, (low, high, body)) pair; every other node - a group, a
+    branch, a set - is just descended into, which keeps this working when the node shapes differ between versions."""
+    if isinstance(node, tuple) and node and node[0] in _REPEATS and len(node) > 1 \
+            and isinstance(node[1], tuple) and len(node[1]) > 2:
+        low, high, body = node[1][0], node[1][1], node[1][2]
+        if inside and high > 1 and high != low:
+            return True
+        return _inside_unbounded_repeat(body, inside or high == _UNBOUNDED)
+    return any(_inside_unbounded_repeat(part, inside) for part in _parts(node))
+
+
+def _patterns_of(node, seen: set | None = None):
+    """Every regex a schema can compile: "pattern" values and "patternProperties" keys, anywhere in the tree - which
+    covers $defs and definitions too, so a local $ref cannot hide one."""
+    seen = seen if seen is not None else set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "pattern" and isinstance(value, str):
+                if value not in seen:
+                    seen.add(value)
+                    yield value
+            elif key == "patternProperties" and isinstance(value, dict):
+                for name, sub in value.items():
+                    if isinstance(name, str) and name not in seen:
+                        seen.add(name)
+                        yield name
+                    yield from _patterns_of(sub, seen)
+            else:
+                yield from _patterns_of(value, seen)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _patterns_of(value, seen)
+
+
+def patterns_checked() -> bool:
+    """STRATA_SAFE_SCHEMA_PATTERNS=0 lets a pattern that can take exponential time through anyway."""
+    return os.environ.get("STRATA_SAFE_SCHEMA_PATTERNS", "1").strip() != "0"
+
+
+def check_patterns(schema) -> None:
+    """Refuse a schema whose regexes can blow up on text the model chose; see _nested_quantifier."""
+    for pattern in _patterns_of(schema):
+        if _nested_quantifier(pattern):
+            raise ValueError(f"response_format schema has a pattern that can take exponential time to match, "
+                             f"because one quantifier sits inside another: {pattern!r}. Write it without the nesting "
+                             f"(\"a+\", or \"a+(?: a+)*\", rather than \"(a+)+\"); STRATA_SAFE_SCHEMA_PATTERNS=0 "
+                             f"accepts it anyway")
+
+
 def prepare_format(response_format, messages, with_tools=False):
     if response_format is None:
         return messages, None
@@ -117,6 +211,8 @@ def prepare_format(response_format, messages, with_tools=False):
             for value in node:
                 check_refs(value)
     check_refs(schema)
+    if modules is not None and patterns_checked():
+        check_patterns(schema)              # only worth refusing when the pattern will actually be matched
     if modules is None:
         validator = _ObjectOnly()
     else:

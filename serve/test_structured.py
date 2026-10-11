@@ -1,5 +1,6 @@
 """Exercise the JSON contract through HTTP, including H3's strict Story shape."""
 import json
+import os
 import unittest
 import urllib.error
 import urllib.request
@@ -38,6 +39,9 @@ STORY_SCHEMA = object_schema({
     "suggestions": {"type": "array", "items": object_schema({"what": TEXT, "why": TEXT,
         "boxes": {"type": "array", "items": {"type": "integer"}}, "description": TEXT})}})
 FORMAT = {"type": "json_schema", "json_schema": {"name": "h3_story", "strict": True, "schema": STORY_SCHEMA}}
+
+# a quantifier inside a quantifier: exponential in what the model wrote, see serve/structured.py
+SLOW_PATTERN_SCHEMA = object_schema({"a": {"type": "string", "pattern": r"(a+)+$"}})
 
 
 class Structured(unittest.TestCase):
@@ -201,6 +205,31 @@ class Structured(unittest.TestCase):
                     self.assertIn("only JSON objects", reply["error"]["message"])
             load.assert_not_called()
 
+    @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema is not installed")
+    def test_a_blowing_up_pattern_is_400_before_the_engine_runs(self):
+        # refused when the schema is checked, so the engine is never loaded for it
+        fmt = {"type": "json_schema", "json_schema": {"name": "slow", "schema": SLOW_PATTERN_SCHEMA}}
+        with mock.patch.object(self.svc, "load") as load:
+            code, reply = self.chat(response_format=fmt)
+            self.assertEqual(code, 400, reply)
+            self.assertIn("STRATA_SAFE_SCHEMA_PATTERNS", reply["error"]["message"])
+            load.assert_not_called()
+
+    @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema is not installed")
+    def test_the_pattern_check_can_be_turned_off(self):
+        # the answer has to match the pattern here, because with the check off jsonschema really does compile it and
+        # match it - which is the point
+        fmt = {"type": "json_schema", "json_schema": {"name": "slow", "schema": SLOW_PATTERN_SCHEMA}}
+        with mock.patch.dict(os.environ, {"STRATA_SAFE_SCHEMA_PATTERNS": "0"}):
+            self.assertEqual(self.chat('{"a":"aaa"}', response_format=fmt)[0], 200)
+
+    @unittest.skipIf(HAVE_JSONSCHEMA, "jsonschema is installed, so patterns are checked")
+    def test_without_jsonschema_a_blowing_up_pattern_is_still_accepted(self):
+        # setup does not install jsonschema, and without it no pattern is ever compiled: nothing is refused here
+        # that will never be matched
+        fmt = {"type": "json_schema", "json_schema": {"name": "slow", "schema": SLOW_PATTERN_SCHEMA}}
+        self.assertEqual(self.chat('{"a":"aaa"}', response_format=fmt)[0], 200)
+
     def test_the_server_does_not_import_jsonschema_at_start(self):
         import subprocess
         import sys
@@ -208,6 +237,48 @@ class Structured(unittest.TestCase):
                 "sys.exit(1 if any(m == 'jsonschema' or m.startswith('jsonschema.') for m in sys.modules) else 0)")
         r = subprocess.run([sys.executable, "-c", code], cwd=str(Path(__file__).resolve().parents[1]))
         self.assertEqual(r.returncode, 0)
+
+
+class SchemaPatterns(unittest.TestCase):
+    """The regex shape that turns one json_schema request into a core that never comes back, and the ordinary
+    patterns that must not be refused for it.  These need no jsonschema: they test the analyzer itself."""
+
+    def test_a_quantifier_inside_a_quantifier_is_refused(self):
+        for pattern in (r"(a+)+$", r"(a+)*", r"(a*)+", r"x(a+)+y", r"([a-z]+)+$", r"^(\w+\s?)*$", r"(\d+\.\d*)+"):
+            with self.subTest(pattern=pattern):
+                self.assertTrue(structured._nested_quantifier(pattern))
+
+    def test_ordinary_patterns_are_left_alone(self):
+        # every one of these is a shape real schemas use; refusing them would be the bug, not missing them
+        for pattern in (r"^[a-z]+@[a-z]+\.[a-z]{2,}$", r"^\d{3}-\d{4}$",
+                        r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$", r"^(https?://)?example\.com$",
+                        r"^[0-9a-f]{8}-[0-9a-f]{4}$", r"^[-+]?\d*\.?\d+([eE][-+]?\d+)?$", r"^(?:[0-9a-f]{2})+$",
+                        r"^\s*(?:[-*+]\s+)?[^\n]+$", r"(a+){2,3}", r"a*b+c?", r"\bfoo(bar)?baz\b", r"(.)*"):
+            with self.subTest(pattern=pattern):
+                self.assertFalse(structured._nested_quantifier(pattern))
+
+    def test_the_shape_is_found_wherever_the_schema_hides_it(self):
+        slow = {"type": "string", "pattern": r"(a+)+$"}
+        schemas = (object_schema({"a": slow}),
+                   {**object_schema({"a": {"$ref": "#/$defs/p"}}), "$defs": {"p": slow}},
+                   {"type": "object", "patternProperties": {r"(a+)+": {"type": "string"}}},
+                   {"type": "object", "anyOf": [{"type": "object", "properties": {"a": slow}}]},
+                   {"type": "object", "properties": {"a": {"type": "array", "items": [slow]}}})
+        for schema in schemas:
+            with self.subTest(schema=schema):
+                with self.assertRaises(ValueError) as caught:
+                    structured.check_patterns(schema)
+                self.assertIn("STRATA_SAFE_SCHEMA_PATTERNS", str(caught.exception))
+
+    def test_the_story_schema_this_file_elsewhere_uses_is_left_alone(self):
+        structured.check_patterns(STORY_SCHEMA)                     # raises nothing
+
+    def test_the_check_is_on_unless_asked_off(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("STRATA_SAFE_SCHEMA_PATTERNS", None)
+            self.assertTrue(structured.patterns_checked())
+        with mock.patch.dict(os.environ, {"STRATA_SAFE_SCHEMA_PATTERNS": "0"}):
+            self.assertFalse(structured.patterns_checked())
 
 
 if __name__ == "__main__":

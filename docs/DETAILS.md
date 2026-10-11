@@ -1925,6 +1925,15 @@ llama.cpp's `json_schema` send. A root that also allows an array, string, number
 "jsonschema>=4.23,<5"`; setup does not add it); without it the answer is only checked to be one JSON object, and the
 server says so once.
 
+A schema's `pattern` is matched with Python's `re` against whatever the model wrote, and one request supplies both,
+so a quantifier inside a quantifier is exponential in the answer: `(a+)+$` takes 0.15 s on 22 characters, 1.8 s on 26
+and 28 s on 30 (measured on smolbox, Python 3.14.8), and 40 characters never come back. One such request holds a core
+and, on `/v1/responses`, the model's FIFO behind it. The shape is therefore refused with **400** when the schema is
+checked, before the model is loaded; `patternProperties` keys and patterns behind a local `$ref` are checked the same
+way. Ordinary patterns are left alone (`(a+){2,3}` and `(.)*` are polynomial, and pass), and
+`STRATA_SAFE_SCHEMA_PATTERNS=0` accepts the nested shape anyway. Without `jsonschema` installed nothing is refused,
+because no pattern is ever matched.
+
 This is **schema prompting followed by server validation**, not grammar-constrained decoding. One generation
 is made per request, with no hidden retry. Successful responses contain a validated JSON object. Malformed JSON,
 duplicate keys, non-finite numbers, schema violations and incomplete generations return **502** with
