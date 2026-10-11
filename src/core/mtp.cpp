@@ -280,6 +280,23 @@ bool MtpDrafter::load(const std::string& rt_dir, const ModelGeometry& g, Session
         }
         std::vector<uint8_t> blob;
         if (!read_file(rt_dir + "/dense.bin", blob)) { err = "mtp: cannot read dense.bin"; return false; }
+        // dense.txt and dense.bin are separate files that have to agree: the readers size their reads from rows and
+        // cols, so both the declared length and what the kind implies must fit inside the blob.
+        for (const Tensor& t : tensors_) {
+            bool shape = t.rows >= 1 && t.cols >= 1;
+            if (shape && (uint64_t) t.rows > ~0ull / (uint64_t) t.cols) shape = false;   // the product would wrap
+            const uint64_t n = shape ? (uint64_t) t.rows * (uint64_t) t.cols : 0;
+            uint64_t want = ~0ull;   // no kind matches: refuse
+            if (t.kind == "f32" && shape) want = n * 4;
+            else if (t.kind == "bf16" && shape) want = n * 2;
+            else if (t.kind == "q8_0" && shape && n % 32 == 0) want = (n / 32) * 34;   // 34 bytes per 32 values
+            if (want != t.bytes || t.off > blob.size() || t.bytes > (uint64_t) blob.size() - t.off) {
+                err = "mtp: dense.txt has " + t.name + " as " + t.kind + " " + std::to_string(t.rows) + "x" +
+                      std::to_string(t.cols) + ", " + std::to_string(t.bytes) + " bytes at " +
+                      std::to_string(t.off) + ", but dense.bin is " + std::to_string(blob.size()) + " bytes";
+                return false;
+            }
+        }
         const cudaError_t alloc = cudaMalloc((void**) &dense_, blob.size());
         if (alloc != cudaSuccess) {
             size_t free_bytes = 0, total_bytes = 0;
@@ -639,6 +656,15 @@ bool MtpDrafter::bind(const WeightTable& wt, const NativeHead* head, const float
         std::vector<uint8_t> raw;
         if (read_file(vocab_file(), raw) && raw.size() >= 4 && raw.size() % 4 == 0) {
             n_dvocab_ = (int64_t) (raw.size() / 4);
+            dvocab_host_.resize((size_t) n_dvocab_);
+            std::memcpy(dvocab_host_.data(), raw.data(), raw.size());
+            // the ids index rows of the main head, so they have to exist in it
+            for (const int32_t id : dvocab_host_)
+                if (id < 0 || (int64_t) id >= n_vocab_) {
+                    err = "mtp: " + vocab_file() + " holds token " + std::to_string((long long) id) +
+                          ", which is outside the vocabulary of " + std::to_string((long long) n_vocab_);
+                    return false;
+                }
             const int64_t row_bytes = (int64_t) head->row_bytes();   // a vocabulary row of the native head
             if (cudaMalloc((void**) &dvocab_, raw.size()) != cudaSuccess ||
                 cudaMalloc((void**) &dhead_, (size_t) (n_dvocab_ * row_bytes)) != cudaSuccess) {
@@ -647,8 +673,6 @@ bool MtpDrafter::bind(const WeightTable& wt, const NativeHead* head, const float
                 return false;
             }
             cudaMemcpy(dvocab_, raw.data(), raw.size(), cudaMemcpyHostToDevice);
-            dvocab_host_.resize((size_t) n_dvocab_);
-            std::memcpy(dvocab_host_.data(), raw.data(), raw.size());
             strata::kernels::gather_rows((const uint8_t*) head->weights(), row_bytes, dvocab_, n_dvocab_, dhead_, nullptr);
             cudaDeviceSynchronize();
             vram_ += (uint64_t) (n_dvocab_ * row_bytes) + raw.size();
