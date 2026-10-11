@@ -4633,6 +4633,25 @@ def body_limit() -> int:
     return mib << 20 if mib > 0 else CHUNKED_BODY_MAX
 
 
+# a deadline for one socket read or write, not for the whole request: a client that keeps sending is never cut off
+HTTP_TIMEOUT_S = _timeout_env("STRATA_HTTP_TIMEOUT_S", 30.0)
+
+MAX_REQUESTS = 128
+
+
+def max_requests() -> int:
+    """The most requests one server holds threads for at once; past the limit a request is answered 503 before its
+    body is read.  STRATA_MAX_REQUESTS changes it (0: no cap; an unreadable value: the default)."""
+    raw = os.environ.get("STRATA_MAX_REQUESTS")
+    if raw is None:
+        return MAX_REQUESTS
+    try:
+        n = int(raw)
+    except ValueError:
+        return MAX_REQUESTS
+    return n if n > 0 else 0
+
+
 class BadBody(Exception):
     """A request body that cannot be read (a malformed or oversized chunked body): the status and the sentence."""
 
@@ -4642,16 +4661,29 @@ class BadBody(Exception):
 
 
 def make_handler(svc: Service):
+    limit = max_requests()
+    slots = threading.Semaphore(limit) if limit else None   # the requests that may hold a thread at once
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.0"                       # SSE ends by closing the connection
+        timeout = HTTP_TIMEOUT_S                            # the deadline for one socket read or write
 
         record = None                                       # #332: this request's monitor record, if kept
         watch_done = None                                   # #430 #431: stops this request's disconnect watcher
         body_read = False                                   # whether a handler took this request's body
+        slot_held = False                                   # whether this request holds one of `slots`
         DRAIN_SECONDS = 5                                   # the longest an unread body is read and dropped
 
         def log_message(self, fmt, *args):
             pass
+
+        def handle(self):
+            try:
+                super().handle()
+            finally:
+                if self.slot_held:                          # however the request ended, its slot comes back
+                    self.slot_held = False
+                    slots.release()
 
         def handle_one_request(self):
             self.answer_started = False
@@ -4769,7 +4801,7 @@ def make_handler(svc: Service):
                 return False
             host = self.headers.get("Host")
             if svc.api_key or host_allowed(host, svc.host_names, "*" in svc.allowed_hosts):
-                return True
+                return self._take_slot()
             print(f"[strata] refused a request for Host {host!r} from {self.client_address[0]}: not a name this server "
                   f"answers to (add it to \"allowed_hosts\" in the config or STRATA_ALLOWED_HOSTS, or set an API key)",
                   flush=True)
@@ -4778,6 +4810,25 @@ def make_handler(svc: Service):
                              f"name on purpose? Add it to \"allowed_hosts\" in the config (strata-<model>.json) or to "
                              f"the STRATA_ALLOWED_HOSTS environment variable, or set an API key (\"api_key\"), which "
                              f"turns this check off"}})
+            return False
+
+        def _take_slot(self) -> bool:
+            """At most `max_requests()` requests at a time.  Taken after the request line and headers are read and
+            before the body, so an answer over the limit replaces the request the way every early answer does (the
+            drain still drops whatever body follows it).  /health is exempt: a server at its limit must still answer
+            whether it is alive, and it costs no body and no GPU time.  A keep-alive request that already holds a
+            slot keeps it rather than taking a second one."""
+            if self.slot_held or slots is None:
+                return True
+            if self.path.split("?")[0].rstrip("/") in ("/health", "/api/health"):
+                return True
+            if slots.acquire(blocking=False):
+                self.slot_held = True
+                return True
+            self.close_connection = True
+            self._json(503, {"error": {"type": "server_error",
+                                       "message": f"{limit} requests are already in flight; try again shortly "
+                                                  f"(STRATA_MAX_REQUESTS raises the limit)"}})
             return False
 
         def _foreign_page(self) -> bool:

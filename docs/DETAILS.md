@@ -916,6 +916,13 @@ print(r.choices[0].message.content)
   an API key, the key decides. `POST /unload` and `POST /load` take `Content-Type: application/json` from Strata's
   own page (or no `Origin`), like `/settings`. `POST /slots/0?action=save|restore` keeps the Host and API-key checks
   and also takes only JSON from no `Origin`, Strata's own page or a trusted origin - also when an API key is set.
+- **Slow and stalled clients.** A request gets 30 s per socket read or write (`STRATA_HTTP_TIMEOUT_S`; 0 waits for
+  ever, as before). It is a deadline for one read, not for the whole request: a client that keeps sending is served
+  normally and only one that stops mid-request is dropped, and generation time is not counted, because the thread
+  waits on the engine there rather than on the socket. At most 128 requests hold threads at once
+  (`STRATA_MAX_REQUESTS`; 0 means no cap); past that a request is answered **503** before its body is read, so a
+  flood of clients cannot grow the thread count until the machine runs out of memory. `/health` is exempt: a server
+  at its limit must still answer whether it is alive.
 
 **Conversation cache.** A request that continues a chat reads only the part after what the engine already holds: the
 live session, or one of the checkpoints it keeps in RAM (up to 6, ~118 MB each, taken at the start of each new

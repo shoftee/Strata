@@ -1,27 +1,51 @@
 """0.1.41 server hardening: a JSON body of the wrong shape is a 400 (not a dropped connection), an oversized body is a
 413 before it is read, a bad Content-Length is a 400, and a sampling field of the wrong type is a 400 that names it.
+And a connection that stops mid-request is closed rather than holding a thread for ever, with at most
+STRATA_MAX_REQUESTS requests served at once.
 
     python -m unittest serve.test_request_hardening -v
 """
 import http.client
 import json
 import os
+import socket
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from serve.frontend import ChatTemplate
-from serve.server import ByteTokenizer, MockEngine, Service, body_limit, serve
+from serve.server import (ByteTokenizer, HTTP_TIMEOUT_S, MockEngine, Service, body_limit, max_requests,
+                          serve)
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def post(port, path, body, headers=None):
+    """One request on its own connection: the status and the decoded answer."""
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+    try:
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
+        c.request("POST", path, body=data, headers={"Content-Type": "application/json", **(headers or {})})
+        r = c.getresponse()
+        return r.status, json.loads(r.read() or b"{}")
+    finally:
+        c.close()
+
+
+def service():
+    tok = ByteTokenizer()
+    return Service(MockEngine(tok, "hello there", max_context=4096), tok,
+                   ChatTemplate(ROOT / "serve/chat_template.jinja"))
+
+
+ASK = {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8}
 
 
 class Hardening(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        tok = ByteTokenizer()
-        cls.svc = Service(MockEngine(tok, "hello there", max_context=4096), tok,
-                          ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        cls.svc = service()
         cls.httpd = serve(cls.svc, port=0)
         cls.port = cls.httpd.server_address[1]
 
@@ -31,14 +55,7 @@ class Hardening(unittest.TestCase):
         cls.httpd.server_close()
 
     def post(self, path, body, headers=None):
-        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=20)
-        try:
-            data = body if isinstance(body, bytes) else json.dumps(body).encode()
-            c.request("POST", path, body=data, headers={"Content-Type": "application/json", **(headers or {})})
-            r = c.getresponse()
-            return r.status, json.loads(r.read() or b"{}")
-        finally:
-            c.close()
+        return post(self.port, path, body, headers)
 
     def test_wrong_shapes_are_400(self):
         for path, body in (("/v1/chat/completions", {"messages": 5}),
@@ -58,7 +75,7 @@ class Hardening(unittest.TestCase):
         self.assertEqual(code, 400, out)
 
     def test_a_good_request_still_answers(self):
-        code, out = self.post("/v1/chat/completions", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8})
+        code, out = self.post("/v1/chat/completions", ASK)
         self.assertEqual(code, 200, out)
 
     def test_oversized_content_length_is_413_unread(self):
@@ -170,6 +187,131 @@ class Hardening(unittest.TestCase):
         code, out = self.post("/v1/messages/count_tokens", {"messages": [{"role": "user", "content": "hi"}],
                                                             "temperature": 0.7})
         self.assertEqual(code, 200, out)
+
+    def test_the_handler_carries_a_socket_timeout(self):
+        # the fix is that a deadline exists at all: without it a half-sent request holds its thread for good
+        self.assertIsNotNone(self.httpd.RequestHandlerClass.timeout)
+        self.assertEqual(self.httpd.RequestHandlerClass.timeout, HTTP_TIMEOUT_S)
+
+    def test_the_request_cap_is_configurable(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("STRATA_MAX_REQUESTS", None)
+            self.assertEqual(max_requests(), 128)
+        with mock.patch.dict(os.environ, {"STRATA_MAX_REQUESTS": "8"}):
+            self.assertEqual(max_requests(), 8)
+        with mock.patch.dict(os.environ, {"STRATA_MAX_REQUESTS": "0"}):
+            self.assertEqual(max_requests(), 0)                      # 0: no cap
+        with mock.patch.dict(os.environ, {"STRATA_MAX_REQUESTS": "junk"}):
+            self.assertEqual(max_requests(), 128)
+
+
+class StalledConnection(unittest.TestCase):
+    """A connection that stops mid-request is closed by the deadline instead of holding a thread for ever.  The
+    deadline is short here so the test is quick; it is the same code path the 30 s default takes."""
+
+    @classmethod
+    def setUpClass(cls):
+        patcher = mock.patch("serve.server.HTTP_TIMEOUT_S", 0.4)     # make_handler reads it when the server is made
+        patcher.start()
+        cls.addClassCleanup(patcher.stop)
+        cls.httpd = serve(service(), port=0)
+        cls.port = cls.httpd.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def test_a_half_sent_request_line_is_dropped(self):
+        c = socket.create_connection(("127.0.0.1", self.port))
+        try:
+            c.sendall(b"POST /v1/chat/completions HT")               # the line never ends, and nothing more comes
+            c.settimeout(10)
+            born = time.monotonic()
+            self.assertEqual(c.recv(1), b"")                         # EOF: the server gave up on it
+            self.assertLess(time.monotonic() - born, 10.0)           # the deadline closed it, not the client
+        finally:
+            c.close()
+
+    def test_a_body_that_never_arrives_is_dropped(self):
+        c = socket.create_connection(("127.0.0.1", self.port))
+        try:
+            c.sendall(b"POST /v1/chat/completions HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+                      b"Content-Type: application/json\r\nContent-Length: 100000\r\n\r\n{}")
+            c.settimeout(10)
+            self.assertEqual(c.recv(1), b"")                         # headers read, body never finished
+        finally:
+            c.close()
+
+    def test_a_client_that_keeps_sending_is_never_cut_off(self):
+        # the deadline is per read, not per request: a slow body that keeps arriving is served normally
+        c = socket.create_connection(("127.0.0.1", self.port))
+        try:
+            body = json.dumps(ASK).encode()
+            c.sendall(b"POST /v1/chat/completions HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+                      b"Content-Type: application/json\r\nContent-Length: " + str(len(body)).encode()
+                      + b"\r\n\r\n")
+            for byte in body:                                        # one byte per write, well past 0.4 s apart
+                c.sendall(bytes([byte]))
+                time.sleep(0.02)
+            c.settimeout(20)
+            got = b""
+            while not got.endswith(b"\n\n") or b"200" not in got:
+                piece = c.recv(65536)
+                if not piece:
+                    break
+                got += piece
+            self.assertIn(b"200 OK", got.split(b"\r\n", 1)[0], got[:200])
+        finally:
+            c.close()
+
+
+class TooManyRequests(unittest.TestCase):
+    """Past STRATA_MAX_REQUESTS a request is answered 503 instead of taking another thread, and /health is exempt:
+    a server at its limit must still answer whether it is alive."""
+
+    @classmethod
+    def setUpClass(cls):
+        patcher = mock.patch.dict(os.environ, {"STRATA_MAX_REQUESTS": "1"})
+        patcher.start()
+        cls.addClassCleanup(patcher.stop)
+        cls.httpd = serve(service(), port=0)
+        cls.port = cls.httpd.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def hold_the_only_slot(self):
+        """A connection whose headers are parsed and whose body never finishes: it keeps the slot it took."""
+        c = socket.create_connection(("127.0.0.1", self.port))
+        c.sendall(b"POST /v1/chat/completions HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+                  b"Content-Type: application/json\r\nContent-Length: 100000\r\n\r\n{}")
+        return c
+
+    def test_over_the_limit_is_503_and_health_is_exempt(self):
+        held = self.hold_the_only_slot()
+        self.addCleanup(held.close)
+        code, out = None, {}
+        for _ in range(100):                       # the held request has to reach parse_request first
+            with mock.patch("builtins.print"):
+                code, out = post(self.port, "/v1/chat/completions", ASK)
+            if code == 503:
+                break
+            time.sleep(0.05)
+        self.assertEqual(code, 503, out)
+        self.assertIn("STRATA_MAX_REQUESTS", out["error"]["message"])
+
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=20)   # that slot is still held here
+        try:
+            c.request("GET", "/health")
+            r = c.getresponse()
+            body = json.loads(r.read() or b"{}")
+            self.assertEqual(r.status, 200, body)
+            self.assertEqual(body["status"], "ok")
+        finally:
+            c.close()
 
 
 if __name__ == "__main__":
