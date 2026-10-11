@@ -74,7 +74,7 @@ elif [ "${REINSTALL:-0}" = "1" ] || [ ! -f "$cfg" ]; then
     echo "Setting up $tag: downloading the model (~70 GB; the engine is already in the image)."
   fi
   set -- --family "$FAMILY" --model "$MODEL" --context "$CONTEXT" --vision "$VISION" \
-    --data-dir "$STRATA_DATA" --host "$HOST" --api-key "$API_KEY" \
+    --data-dir "$STRATA_DATA" --host "$HOST" \
     --port "$PORT" --no-start --low-ram "$LOW_RAM"
   if [ -n "$KV" ]; then set -- "$@" --kv "$KV"; fi
   if [ -n "$GPUS" ]; then set -- "$@" --gpus "$GPUS"; fi
@@ -83,7 +83,8 @@ elif [ "${REINSTALL:-0}" = "1" ] || [ ! -f "$cfg" ]; then
   if [ -n "$GGUF_DIR" ]; then set -- "$@" --gguf-dir "$GGUF_DIR"; fi
   if [ -n "$RESIDENT_BUDGET_GIB" ]; then set -- "$@" --resident-budget-gib "$RESIDENT_BUDGET_GIB"; fi
   if [ -n "$KV_STREAMING" ]; then set -- "$@" --kv-streaming "$KV_STREAMING"; fi
-  .venv/bin/python setup.py --setup --yes "$@"
+  # in the environment, not on the command line: arguments show up in ps and docker top
+  STRATA_API_KEY="${API_KEY:-}" .venv/bin/python setup.py --setup --yes "$@"
   [ -e "/opt/strata/strata-$tag.json" ] && { cmp -s "/opt/strata/strata-$tag.json" "$cfg" || cp -f "/opt/strata/strata-$tag.json" "$cfg"; }
   echo "Config: $cfg (from MODEL $MODEL, just set up)"
 else
