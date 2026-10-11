@@ -4883,6 +4883,39 @@ class ConnectionClose(unittest.TestCase):
         self.assertEqual(self.headers(stream=True).get("Connection"), "close")
 
 
+class SecurityHeaders(unittest.TestCase):
+    """end_headers() is where every response gains a header.  It already existed to say Connection: close, so a
+    second definition of it would quietly replace that one instead of adding to it."""
+
+    @classmethod
+    def setUpClass(cls):
+        tok = ByteTokenizer()
+        cls.svc = Service(MockEngine(tok, "</think>\n\nok", max_context=CTX), tok,
+                          ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        cls.httpd = serve(cls.svc, port=0)
+        cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def test_api_pages_and_assets_all_carry_them(self):
+        for path in ("/health", "/v1/models", "/web/app.js", "/fonts/outfit-latin-wght.woff2"):
+            with urllib.request.urlopen(self.base + path, timeout=30) as r:
+                h = r.headers
+                self.assertEqual(h.get("X-Content-Type-Options"), "nosniff", path)
+                csp = h.get("Content-Security-Policy") or ""
+                self.assertIn("default-src 'self'", csp, path)
+                self.assertIn("frame-ancestors", csp, path)
+                self.assertEqual(h.get("Connection"), "close", path)   # the header end_headers() existed for
+
+    def test_a_refused_request_carries_them_too(self):
+        with self.assertRaises(urllib.error.HTTPError) as got:
+            urllib.request.urlopen(self.base + "/web/nothing-here.js", timeout=30)
+        self.assertEqual(got.exception.headers.get("X-Content-Type-Options"), "nosniff")
+
+
 class AnswerBeforeTheBody(unittest.TestCase):
     """An answer sent before the request body was read must still reach a client that sends the body after the headers
     (http.client, urllib and requests do): closing the connection on unread bytes sends a reset that eats the answer."""

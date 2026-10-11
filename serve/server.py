@@ -4858,6 +4858,13 @@ def make_handler(svc: Service):
             # before the close reaches it, and that request fails with "response ended prematurely" without the
             # server ever reading it (a .NET agent app, 2026-10-03: 25 of ~1000 requests, 1-24 ms after the previous answer).
             self.send_header("Connection", "close")
+            # the browser must not guess a content type, and the page may only load its own files ('unsafe-inline'
+            # for the theme block and the progress bars, which are written before app.js runs)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' "
+                             "'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; "
+                             "frame-ancestors 'self'; base-uri 'self'; form-action 'self'")
             super().end_headers()
 
         def _watch_client(self, cancel: threading.Event) -> None:
