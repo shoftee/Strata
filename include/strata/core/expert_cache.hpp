@@ -77,6 +77,10 @@ bool write_expert_profile(const std::string& path, int64_t n_layers, int64_t n_e
 /// files' clean pages and gives way to a device allocation.  There the figure is MemAvailable less 6 GiB for the OS
 /// and the engine's host side (STRATA_UMA_HEADROOM_GIB).  Elsewhere it is cudaMemGetInfo's.
 size_t device_free_bytes();
+/// True when the current device shares one memory with the CPU - an integrated GPU (an APU, a Strix Halo, a GB10),
+/// as CUDA and HIP report via cudaDevAttrIntegrated.  The Monitor uses it to say whether the experts and the KV live
+/// in the graphics card's own memory or in system RAM.  False on the gfx906 compat layer (no such attribute; discrete).
+bool device_unified();
 
 class ExpertCache {
 public:

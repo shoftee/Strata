@@ -25,25 +25,32 @@ namespace strata::core {
 // See the header.  NVIDIA's DGX Spark Porting Guide (section 5.5, "Memory reporting on UMA systems") recommends the same:
 // not to rely on cudaMemGetInfo alone but to count the memory the OS can reclaim.  Swap is not counted here (unlike
 // NVIDIA's reference snippet): an expert cache that pushes the system into swap would be far slower than a smaller one.
+// Is the current device an integrated GPU sharing one memory with the CPU - an APU, a Strix Halo, a GB10?  CUDA and
+// HIP report it as cudaDevAttrIntegrated; the gfx906 compat layer has no such attribute and that GPU is discrete.
+// Cached per device: a box can mix an integrated GPU with a discrete one, and the answer is the CURRENT device's.
+bool device_unified() {
+#if defined(STRATA_HIP_GFX906)
+    return false;
+#else
+    static std::atomic<int> uma_cache[64];   // 0 unknown, 1 integrated (unified memory), 2 discrete
+    int dev = 0, v = 0;
+    if (cudaGetDevice(&dev) == cudaSuccess && dev >= 0 && dev < 64) {
+        int c = uma_cache[dev].load(std::memory_order_acquire);
+        if (c == 0) {
+            c = cudaDeviceGetAttribute(&v, cudaDevAttrIntegrated, dev) == cudaSuccess && v ? 1 : 2;
+            uma_cache[dev].store(c, std::memory_order_release);
+        }
+        return c == 1;
+    }
+    return false;
+#endif
+}
+
 size_t device_free_bytes() {
     size_t free_b = 0, total_b = 0;
     cudaMemGetInfo(&free_b, &total_b);
-#if defined(__linux__) && !defined(STRATA_HIP_GFX906)   // (the gfx906 compat layer has no cudaDevAttrIntegrated; that GPU is discrete)
-    // per device: a box can mix an integrated GPU (an APU) with a discrete one, and the answer is the CURRENT device's
-    static std::atomic<int> uma_cache[64];   // 0 unknown, 1 integrated (unified memory), 2 discrete
-    bool unified_memory = false;
-    {
-        int dev = 0, v = 0;
-        if (cudaGetDevice(&dev) == cudaSuccess && dev >= 0 && dev < 64) {
-            int c = uma_cache[dev].load(std::memory_order_acquire);
-            if (c == 0) {
-                c = cudaDeviceGetAttribute(&v, cudaDevAttrIntegrated, dev) == cudaSuccess && v ? 1 : 2;
-                uma_cache[dev].store(c, std::memory_order_release);
-            }
-            unified_memory = c == 1;
-        }
-    }
-    if (unified_memory) {
+#if defined(__linux__)
+    if (device_unified()) {   // unified memory: cudaMemGetInfo counts only MemFree, so count what the OS can reclaim
         if (FILE* m = std::fopen("/proc/meminfo", "r")) {
             char line[256];
             unsigned long long kb = 0;

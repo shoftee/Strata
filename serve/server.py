@@ -3396,7 +3396,7 @@ class Service:
         return {"ram_total": hw.get("ram_total"), "ram_used": hw.get("ram_used"),
                 "arena_bytes": arena or None, "expert_cache_bytes": expert_cache or None,
                 "vram_free_bytes": vram_free or None, "gpu_mem_total": gpu_total, "gpu_mem_used": hw.get("gpu_mem_used"),
-                "unified": bool(gpu_total and expert_cache > gpu_total),
+                "unified": bool(eng.get("unified")),
                 "conv_bytes": int(parked.get("bytes") or 0) or None, "conv_parked": parked.get("parked"),
                 "conv_budget_bytes": mib(eng.get("conversation_cache_mib")) or None,
                 "engine_rss": engine_rss, "vision_bytes": vision_rss, "server_bytes": rss(os.getpid()),

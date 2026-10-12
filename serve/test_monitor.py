@@ -270,16 +270,20 @@ class MemoryBreakdown(unittest.TestCase):
         engine.info = {"arena_mib": 40960, "expert_cache_mib": 20480, "vram_free_mib": 4096, "conversation_cache_mib": 8192}
         return Service(engine, tok, ChatTemplate(Path(__file__).parent / "chat_template.jinja"))
 
-    def test_the_figures_and_the_unified_flag(self):
+    def test_the_figures(self):
         svc = self.service()
         m = svc._memory(self.HW, self.PARKED)
         self.assertEqual(m["arena_bytes"], 40960 * 2**20)
         self.assertEqual(m["expert_cache_bytes"], 20480 * 2**20)
         self.assertEqual(m["conv_bytes"], 5 * 2**30)
-        self.assertFalse(m["unified"])                             # a 20 GiB cache fits a 24 GiB card: discrete
-        # a card whose own VRAM cannot hold the cache is a shared-memory box: the device memory joins the RAM bar
-        m2 = svc._memory({**self.HW, "gpu_mem_total": 512 * 2**20}, self.PARKED)
-        self.assertTrue(m2["unified"])
+
+    def test_the_unified_flag_comes_from_the_engine(self):
+        svc = self.service()
+        self.assertFalse(svc._memory(self.HW, self.PARKED)["unified"])
+        svc.engine.info["unified"] = 1
+        self.assertTrue(svc._memory(self.HW, self.PARKED)["unified"])
+        svc.engine.info["unified"] = 0
+        self.assertFalse(svc._memory({**self.HW, "gpu_mem_total": 512 * 2**20}, self.PARKED)["unified"])
 
     def test_slots_report_their_tokens_without_a_kv_estimate(self):
         svc = self.service()
