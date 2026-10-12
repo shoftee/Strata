@@ -185,7 +185,7 @@ function setPill(state, text) { $("pills").innerHTML = pillHtml(state, text); }
 function renderPills(live, multi) {
   if (multi) {
     const pills = (live.slots || []).filter((s) => s.state !== "idle").map((s) => s.state === "reading"
-      ? pillHtml("reading", `Reading prompt${live.prompt_total ? ` · ${Math.round((100 * live.prompt_read) / live.prompt_total)}%` : ""}`)
+      ? pillHtml("reading", `Reading prompt${s.prompt_tokens ? ` · ${Math.round((100 * (s.prompt_read || 0)) / s.prompt_tokens)}%` : ""}`)
       : pillHtml("generating", `${s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "Generating"}${s.tok_s ? ` · ${fmt(s.tok_s, 1)} tok/s` : ""}`));
     if (live.queued > 0) pills.push(pillHtml("queued", `${live.queued} queued`));
     $("pills").innerHTML = pills.join("") || pillHtml("idle", "Idle");
@@ -376,11 +376,11 @@ function renderStateSlots(live) {
   $("state-slots").innerHTML = (live.slots || []).map((s) => {
     const active = s.state !== "idle";
     const label = s.state === "generating" && s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : (name[s.state] || s.state);
-    const reading = s.state === "reading" && live.prompt_total ? Math.min(100, (100 * live.prompt_read) / live.prompt_total) : null;
-    const pct = s.state === "generating" && live.max_tokens ? Math.min(100, (100 * (s.generated || 0)) / live.max_tokens)
+    const reading = s.state === "reading" && s.prompt_tokens ? Math.min(100, (100 * (s.prompt_read || 0)) / s.prompt_tokens) : null;
+    const pct = s.state === "generating" && s.max_tokens ? Math.min(100, (100 * (s.generated || 0)) / s.max_tokens)
       : reading != null ? reading : (active ? 100 : 0);
     const detail = s.state === "generating" ? `${fmt(s.generated || 0)} tok${s.tok_s ? ` · ${fmt(s.tok_s, 1)} t/s` : ""}`
-      : reading != null ? `${fmt(live.prompt_read)} / ${fmt(live.prompt_total)} tok`
+      : reading != null ? `${fmt(s.prompt_read || 0)} / ${fmt(s.prompt_tokens)} tok`
       : active ? `${fmt(s.prompt_tokens || 0)} tok`
       : `${fmt(s.context_tokens || s.held_tokens || 0)} tok`;
     return `<div class="state-slot"><span class="state-slot__name">Slot ${s.slot}</span>` +
