@@ -3457,6 +3457,11 @@ class Service:
                         admitting=int(getattr(self.engine, "admitting", 0) or 0))
             if running and state == "idle":
                 live["state"] = "generating"
+        else:
+            live["slots"] = [{"slot": 0, "state": live["state"], "phase": live["phase"],
+                              "prompt_tokens": live["prompt_tokens"], "prompt_read": live["prompt_read"],
+                              "max_tokens": live["max_tokens"], "generated": live["generated"],
+                              "elapsed_s": live["elapsed_s"], "tok_s": live["tok_s"]}]
         if hasattr(self.engine, "replica_view"):        # opt-in replicas: each one's state and requests routed to it
             live["replicas"] = self.engine.replica_view()
         engine = {"model": self.model, "max_context": self.reported_ctx(), "images": self.vision is not None,
