@@ -1044,10 +1044,11 @@ class StrataEngine:
         except (OSError, AttributeError):                # the pipe is gone (or a restart's close() took the process):
             raise EngineDied(f"the engine stopped unexpectedly (exit code {self.exit_code()})") from None
 
-    def _control(self, cancel, on_token, stop_when=None):
+    def _control(self, cancel, on_token, stop_when=None, live=None):
         """Reads the control lines of the request on them (GEN / BGEN), yielding None heartbeats.  Calls on_token(id)
         for each `T`; returns ("done", None) at DONE, or ("badm", continues) at BADM (after DONE).  `stop_when()`
-        true sends STOP once (the request is then read to its DONE)."""
+        true sends STOP once (the request is then read to its DONE).  `live`: the reading slot's display row, stamped
+        with its own prompt-read progress (the engine's `progress` is one shared figure, not per slot)."""
         stopped = False
         beat = time.monotonic()
         while True:
@@ -1080,6 +1081,8 @@ class StrataEngine:
                     self.progress = (int(f[1]), int(f[2]))
                     self.progress_ms = float(f[3]) if len(f) >= 4 else 0.0
                     self.prefill_tok_s_mean = float(f[4]) if len(f) >= 5 else None
+                    if live is not None:
+                        live["prompt_read"] = int(f[1])          # this slot's own read progress
                 if not stopped and cancel.is_set():
                     # #879: a Stop during the prompt read went out only after the first token (or after 10 s of
                     # silence, which a stream of PP lines never allows): the engine read the whole prompt first
@@ -1330,7 +1333,7 @@ class StrataEngine:
                         if reserved is not None:
                             self.slot_busy[reserved] = True
                             self.slot_claims.add(reserved)
-                            self._slot_reading(reserved, prompt)
+                            self._slot_reading(reserved, prompt, int(max_new))
                     head = f"GENI {left}{keys} {embeddings}" if embeddings else f"GEN {left}{keys}"
                     self._last_done = None                  # (#879: this request's DONE decides below)
                     self._send(f"{head} {','.join(str(int(t)) for t in prompt)}")
@@ -1340,7 +1343,8 @@ class StrataEngine:
                     def others():
                         with self.slot_cv:
                             return self.waiting > 0
-                    for x in self._control(cancel, pending.append, stop_when=others):
+                    for x in self._control(cancel, pending.append, stop_when=others,
+                                           live=self.slot_live[reserved] if reserved is not None else None):
                         while pending:
                             t = pending.pop(0)
                             out.append(t)
@@ -1397,7 +1401,7 @@ class StrataEngine:
                                 if slot is not None:
                                     self.slot_busy[slot] = True
                                     self.slot_claims.add(slot)
-                                    self._slot_reading(slot, prompt)
+                                    self._slot_reading(slot, prompt, int(max_new))
                                     if admit_wait:
                                         admit_wait = False
                                         self.admitting = max(0, self.admitting - 1)
@@ -1444,7 +1448,7 @@ class StrataEngine:
                     while not self.slot_q[slot].empty():
                         self.slot_q[slot].get_nowait()
                     head = f"BGENI {slot} {left}{keys} {embeddings}" if embeddings else f"BGEN {slot} {left}{keys}"
-                    live = self._slot_reading(slot, prompt)
+                    live = self._slot_reading(slot, prompt, int(max_new))
                     self._last_done = None                  # (#879: this admission's DONE decides below)
                     self._send(f"{head} {','.join(str(int(t)) for t in prompt)}")
                     self.slot_held[slot] = []               # the admission overwrites what the slot held
@@ -1452,7 +1456,7 @@ class StrataEngine:
                     self._ctl_mode, self._ctl_result, self._yielded = "batch", None, None
                     self._ctl_erred = False
                     asked = False
-                    for x in self._control(cancel, pending.append):
+                    for x in self._control(cancel, pending.append, live=live):
                         while pending:
                             t = pending.pop(0)
                             out.append(t)
@@ -1586,12 +1590,14 @@ class StrataEngine:
     slot_groups = 1         # --batch-groups (set when the engine starts)
     SLOT_PREFIX_MIN = 512   # a held prefix shorter than this is not worth unbalancing the pipeline's groups
 
-    def _slot_reading(self, slot: int, prompt: list[int]) -> dict:
-        """The live row for a slot that starts reading `prompt`, and the context it holds so far.  The row is kept if
-        the slot already shows one, so a request that moves between the solo and slot paths keeps its timings."""
+    def _slot_reading(self, slot: int, prompt: list[int], max_new: int) -> dict:
+        """The live row for a slot that starts reading `prompt` (with its `max_new` token budget), and the context it
+        holds so far.  The row is kept if the slot already shows one, so a request that moves between the solo and
+        slot paths keeps its timings."""
         live = self.slot_live[slot] or {"slot": slot, "state": "reading", "prompt_tokens": len(prompt),
                                         "generated": 0, "started": time.time(), "first_token": None,
                                         "_st": getattr(self.__dict__.get("_tl"), "st", None)}
+        live["max_tokens"] = max_new
         self.slot_live[slot] = live
         self.slot_ctx[slot] = len(prompt)
         return live
@@ -1602,6 +1608,7 @@ class StrataEngine:
         if live["first_token"] is None:
             live["first_token"] = time.time()
             live["state"] = "decoding"
+            live["prompt_read"] = live["prompt_tokens"]          # the read is done
 
     def _slot_token(self, live: dict, out: list[int]) -> None:
         """Track a slot's token count and the context its tokens add."""
@@ -1661,6 +1668,7 @@ class StrataEngine:
             state = "generating" if r["state"] == "decoding" else r["state"]
             phase = (r.get("_st") or {}).get("phase")
             view.append({"slot": b, "state": state, "phase": phase, "prompt_tokens": r["prompt_tokens"],
+                         "prompt_read": r.get("prompt_read"), "max_tokens": r.get("max_tokens"),
                          "generated": r["generated"], "elapsed_s": round(now - r["started"], 1),
                          "tok_s": round(r["generated"] / max(1e-6, now - ft), 1) if ft else None})
         return view
