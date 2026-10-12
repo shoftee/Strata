@@ -181,6 +181,10 @@ const pillHtml = (state, text) =>
 
 function setPill(state, text) { $("pills").innerHTML = pillHtml(state, text); }
 
+function singleSlot(live) {
+  return (live.slots || []).find((s) => s.state !== "idle") || null;
+}
+
 // the header pills: one per running slot when several requests run together, one for the whole engine otherwise
 function renderPills(live, multi) {
   if (multi) {
@@ -191,13 +195,14 @@ function renderPills(live, multi) {
     $("pills").innerHTML = pills.join("") || pillHtml("idle", "Idle");
     return;
   }
-  if (live.state === "reading") {
-    const pct = live.prompt_total ? Math.round((100 * live.prompt_read) / live.prompt_total) : null;
-    setPill("reading", pct != null ? `Reading prompt · ${pct}%` : "Reading prompt");
-  } else if (live.state === "generating") {
-    setPill("generating", `Generating · ${fmt(live.tok_s, 1)} tok/s`);
-  } else {
+  const s = singleSlot(live);
+  if (!s) {
     setPill("idle", "Idle");
+  } else if (s.state === "reading") {
+    const pct = s.prompt_tokens ? Math.round((100 * (s.prompt_read || 0)) / s.prompt_tokens) : null;
+    setPill("reading", pct != null ? `Reading prompt · ${pct}%` : "Reading prompt");
+  } else {
+    setPill("generating", `Generating · ${fmt(s.tok_s, 1)} tok/s`);
   }
   if (live.queued > 0) setPill("queued", `${live.queued} queued`);
 }
@@ -392,7 +397,7 @@ function renderStateSlots(live) {
 
 function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, mem, multiSlot) {
   // model state
-  const lit = new Set(multiSlot ? (live.slots || []).map((s) => s.state) : [live.state]);
+  const lit = new Set((live.slots || []).map((s) => s.state));
   if (live.queued > 0) lit.add("queued");
   for (const b of document.querySelectorAll("#state-badges .st-badge")) b.classList.toggle("on", lit.has(b.dataset.s));
   $("state-single").hidden = multiSlot;
@@ -401,21 +406,22 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, mem, 
     renderStateSlots(live);
   } else {
     const prog = $("state-progress");
+    const s = singleSlot(live);
     let label = "Waiting for a request", detail = "", pct = 0;
-    if (live.state === "reading") {
+    if (s && s.state === "reading") {
       label = "Reading prompt";
       prog.dataset.tone = "info";
-      if (live.prompt_total) {
-        pct = (100 * live.prompt_read) / live.prompt_total;
-        detail = `${fmt(live.prompt_read)} / ${fmt(live.prompt_total)} tokens · ${fmt(pct)}%`;
+      if (s.prompt_tokens) {
+        pct = (100 * (s.prompt_read || 0)) / s.prompt_tokens;
+        detail = `${fmt(s.prompt_read || 0)} / ${fmt(s.prompt_tokens)} tokens · ${fmt(pct)}%`;
       } else {
-        detail = `${fmt(live.prompt_tokens)} tokens`;
+        detail = `${fmt(s.prompt_tokens || 0)} tokens`;
       }
-    } else if (live.state === "generating") {
-      label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : "Generating";
+    } else if (s && s.state === "generating") {
+      label = s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "Generating";
       delete prog.dataset.tone;
-      pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : 0;
-      detail = `${fmt(live.generated)} tokens · ${fmt(live.tok_s, 1)} tok/s`;
+      pct = s.max_tokens ? Math.min(100, (100 * (s.generated || 0)) / s.max_tokens) : 0;
+      detail = `${fmt(s.generated || 0)} tokens · ${fmt(s.tok_s, 1)} tok/s`;
     } else if (last) {
       delete prog.dataset.tone;
       detail = `last: ${fmt(last.output_tokens)} tokens${last.decode_tok_s ? ` at ${fmt(last.decode_tok_s, 1)} tok/s` : ""}`;
@@ -474,8 +480,9 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, mem, 
   if (multiCtx) {
     renderCtxSlots(live, eng, mem);
   } else {
+    const s = singleSlot(live);
     let used = 0;
-    if (live.state !== "idle") used = (live.prompt_tokens || 0) + (live.generated || 0);
+    if (s) used = (s.prompt_tokens || 0) + (s.generated || 0);
     else if (last) used = (last.prompt_tokens || 0) + (last.output_tokens || 0);
     const frac = ctx ? Math.min(1, used / ctx) : 0;
     $("ctx-fill").setAttribute("stroke-dasharray", `${(235.6 * frac).toFixed(1)} 314.2`);
