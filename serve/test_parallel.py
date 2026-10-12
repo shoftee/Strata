@@ -544,6 +544,14 @@ class ParallelService(unittest.TestCase):
         self.assertEqual(self.engine.pick_slot(mine[0] + [10, 11]), slot)
         self.assertEqual(first["choices"][0]["message"]["content"], "ok, done.")
 
+    def test_a_solo_request_leaves_its_context_on_the_slot(self):
+        """A request answered on the solo path leaves its context on the slot it showed, so the Monitor's idle KV
+        matches what the batch path leaves; the solo path stamped nothing and the slot read empty afterwards."""
+        self.start(2)
+        u = self.chat("hello there", max_tokens=16)["usage"]
+        idle = [s["context_tokens"] for s in self.engine.slots_view() if s["state"] == "idle" and s["context_tokens"]]
+        self.assertEqual(idle, [u["prompt_tokens"] + u["completion_tokens"]])
+
     def test_a_failed_window_names_its_error(self):
         # #997 #890: a batch window fails while every request reads its own slot's lines, so no request reads the
         # engine's ERR line before it exits; the server's note on the death gives it instead of a guess

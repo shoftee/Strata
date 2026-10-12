@@ -1333,6 +1333,7 @@ class StrataEngine:
                             self.slot_live[reserved] = {"slot": reserved, "state": "reading", "prompt_tokens": len(prompt),
                                                         "generated": 0, "started": time.time(), "first_token": None,
                                                         "_st": getattr(self.__dict__.get("_tl"), "st", None)}
+                            self.slot_ctx[reserved] = len(prompt)
                     head = f"GENI {left}{keys} {embeddings}" if embeddings else f"GEN {left}{keys}"
                     self._last_done = None                  # (#879: this request's DONE decides below)
                     self._send(f"{head} {','.join(str(int(t)) for t in prompt)}")
@@ -1353,6 +1354,7 @@ class StrataEngine:
                                         sv["first_token"] = time.time()
                                         sv["state"] = "decoding"
                                     sv["generated"] = len(out)
+                                    self.slot_ctx[reserved] = len(prompt) + len(out)
                             yield t
                         if x is None:                       # a heartbeat (False: a token, flushed above)
                             if not out and not embeddings and yields < self.YIELDS_MAX and self._shorter_waiting(len(prompt)):
