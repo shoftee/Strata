@@ -1330,10 +1330,7 @@ class StrataEngine:
                         if reserved is not None:
                             self.slot_busy[reserved] = True
                             self.slot_claims.add(reserved)
-                            self.slot_live[reserved] = {"slot": reserved, "state": "reading", "prompt_tokens": len(prompt),
-                                                        "generated": 0, "started": time.time(), "first_token": None,
-                                                        "_st": getattr(self.__dict__.get("_tl"), "st", None)}
-                            self.slot_ctx[reserved] = len(prompt)
+                            self._slot_reading(reserved, prompt)
                     head = f"GENI {left}{keys} {embeddings}" if embeddings else f"GEN {left}{keys}"
                     self._last_done = None                  # (#879: this request's DONE decides below)
                     self._send(f"{head} {','.join(str(int(t)) for t in prompt)}")
@@ -1347,14 +1344,11 @@ class StrataEngine:
                         while pending:
                             t = pending.pop(0)
                             out.append(t)
-                            if reserved is not None:        # keep the held slot current, as the batch path does at 1487
+                            if reserved is not None:        # keep the display slot current, as the batch path does
                                 sv = self.slot_live[reserved]
                                 if sv is not None:
-                                    if sv["first_token"] is None:
-                                        sv["first_token"] = time.time()
-                                        sv["state"] = "decoding"
-                                    sv["generated"] = len(out)
-                                    self.slot_ctx[reserved] = len(prompt) + len(out)
+                                    self._slot_decoding(sv)
+                                    self._slot_token(sv, out)
                             yield t
                         if x is None:                       # a heartbeat (False: a token, flushed above)
                             if not out and not embeddings and yields < self.YIELDS_MAX and self._shorter_waiting(len(prompt)):
@@ -1377,10 +1371,7 @@ class StrataEngine:
                     if self._yielded is not None and reserved is not None and self._yielded[0] == reserved:
                         slot, reserved = reserved, None     # gave way: the read goes on in that slot (below)
                     elif reserved is not None:              # it did not give way: the slot is free again
-                        with self.slot_cv:
-                            self.slot_busy[reserved] = False
-                            self.slot_claims.discard(reserved)
-                            self.slot_cv.notify_all()
+                        self._slot_release(reserved)
                         self.slot_live[reserved] = None
                         reserved = None
                     if slot is None:
@@ -1406,9 +1397,7 @@ class StrataEngine:
                                 if slot is not None:
                                     self.slot_busy[slot] = True
                                     self.slot_claims.add(slot)
-                                    self.slot_live[slot] = {"slot": slot, "state": "reading", "prompt_tokens": len(prompt),
-                                                            "generated": 0, "started": time.time(), "first_token": None,
-                                                            "_st": getattr(self.__dict__.get("_tl"), "st", None)}
+                                    self._slot_reading(slot, prompt)
                                     if admit_wait:
                                         admit_wait = False
                                         self.admitting = max(0, self.admitting - 1)
@@ -1455,11 +1444,7 @@ class StrataEngine:
                     while not self.slot_q[slot].empty():
                         self.slot_q[slot].get_nowait()
                     head = f"BGENI {slot} {left}{keys} {embeddings}" if embeddings else f"BGEN {slot} {left}{keys}"
-                    live = self.slot_live[slot] or {"slot": slot, "state": "reading", "prompt_tokens": len(prompt),
-                                                    "generated": 0, "started": time.time(), "first_token": None,
-                                                    "_st": getattr(self.__dict__.get("_tl"), "st", None)}
-                    self.slot_live[slot] = live
-                    self.slot_ctx[slot] = len(prompt)
+                    live = self._slot_reading(slot, prompt)
                     self._last_done = None                  # (#879: this admission's DONE decides below)
                     self._send(f"{head} {','.join(str(int(t)) for t in prompt)}")
                     self.slot_held[slot] = []               # the admission overwrites what the slot held
@@ -1493,7 +1478,8 @@ class StrataEngine:
                 holding = False
                 if not cont:
                     return
-                live.update(state="decoding", first_token=time.time(), generated=len(out))
+                self._slot_decoding(live)
+                self._slot_token(live, out)
                 gen0 = len(out) - 1                         # the admission's own token: the slot feeds it first
                 going_solo = False
                 while True:
@@ -1511,8 +1497,7 @@ class StrataEngine:
                     if line.startswith("BT "):
                         t = int(line.split()[2])
                         out.append(t)
-                        live["generated"] = len(out)
-                        self.slot_ctx[slot] = live["prompt_tokens"] + len(out)
+                        self._slot_token(live, out)
                         if cancel.is_set():
                             if not stop_sent:
                                 self._send(f"BSTOP {slot}")
@@ -1539,10 +1524,7 @@ class StrataEngine:
                             carry_leg(carry, self.last)         # #1869: the solo path's DONE replaces these figures
                             self.slot_live[slot] = None
                             self.slot_used[slot] = time.time()
-                            with self.slot_cv:
-                                self.slot_busy[slot] = False
-                                self.slot_claims.discard(slot)
-                                self.slot_cv.notify_all()
+                            self._slot_release(slot)
                             slot, gen0 = None, None
                             if reused0 is None:
                                 reused0 = (self.last or {}).get("reused")
@@ -1584,10 +1566,7 @@ class StrataEngine:
                 with self.slot_cv:
                     self.admitting = max(0, self.admitting - 1)
             if reserved is not None:
-                with self.slot_cv:
-                    self.slot_busy[reserved] = False
-                    self.slot_claims.discard(reserved)
-                    self.slot_cv.notify_all()
+                self._slot_release(reserved)
                 self.slot_live[reserved] = None             # a solo that held a slot for display but never entered one
             if slot is not None:
                 self.slot_live[slot] = None
@@ -1595,23 +1574,46 @@ class StrataEngine:
                 if phase == "slot" and bdone_in:
                     stream = list(prompt) + out[gen0:] if gen0 is not None and len(out) > gen0 else None
                     self.slot_held[slot] = stream[:-1] if stream else []     # as the BDONE wait leaves it
-                    with self.slot_cv:
-                        self.slot_busy[slot] = False
-                        self.slot_claims.discard(slot)
-                        self.slot_cv.notify_all()
+                    self._slot_release(slot)
                 elif phase == "slot":
                     self.slot_held[slot] = []
                     stream = list(prompt) + out[gen0:] if gen0 is not None and len(out) > gen0 else None
                     self._release_slot_when_done(slot, stream)    # freed at its BDONE
                     self.slot_claims.discard(slot)                # (the BDONE wait owns it now)
                 else:
-                    with self.slot_cv:
-                        self.slot_busy[slot] = False
-                        self.slot_claims.discard(slot)
-                        self.slot_cv.notify_all()
+                    self._slot_release(slot)
 
     slot_groups = 1         # --batch-groups (set when the engine starts)
     SLOT_PREFIX_MIN = 512   # a held prefix shorter than this is not worth unbalancing the pipeline's groups
+
+    def _slot_reading(self, slot: int, prompt: list[int]) -> dict:
+        """The live row for a slot that starts reading `prompt`, and the context it holds so far.  The row is kept if
+        the slot already shows one, so a request that moves between the solo and slot paths keeps its timings."""
+        live = self.slot_live[slot] or {"slot": slot, "state": "reading", "prompt_tokens": len(prompt),
+                                        "generated": 0, "started": time.time(), "first_token": None,
+                                        "_st": getattr(self.__dict__.get("_tl"), "st", None)}
+        self.slot_live[slot] = live
+        self.slot_ctx[slot] = len(prompt)
+        return live
+
+    def _slot_decoding(self, live: dict) -> None:
+        """The slot's first token arrives: it stops reading and starts decoding.  Once only, so a request that moves
+        between the paths keeps its original first-token time."""
+        if live["first_token"] is None:
+            live["first_token"] = time.time()
+            live["state"] = "decoding"
+
+    def _slot_token(self, live: dict, out: list[int]) -> None:
+        """Track a slot's token count and the context its tokens add."""
+        live["generated"] = len(out)
+        self.slot_ctx[live["slot"]] = live["prompt_tokens"] + len(out)
+
+    def _slot_release(self, slot: int) -> None:
+        """Give up `slot`'s lane so it reads idle; its live row and what it held are the caller's to set."""
+        with self.slot_cv:
+            self.slot_busy[slot] = False
+            self.slot_claims.discard(slot)
+            self.slot_cv.notify_all()
 
     def pick_slot(self, prompt: list[int]) -> int | None:
         """A free slot for `prompt` (the caller holds slot_cv): the one whose held tokens are the longest start of the
