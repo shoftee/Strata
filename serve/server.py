@@ -509,7 +509,7 @@ class ConvCacheLog:
     cache: parked N tokens ...; parked=P bytes=B evictions=E" and "restored N tokens ...; parked=P bytes=B" to stderr,
     which is the log): read on from where it was last read, from the start of the engine's current run."""
     EVENT = re.compile(r"conversation cache: (parked|skipped|restored) (\d+) tokens.*?parked=(\d+) bytes=(\d+)"
-                       r"(?: evictions=(\d+))?")
+                       r"(?: evictions=(\d+))?(?: snapshot_bytes=(\d+))?")
     DROPPED = re.compile(r"conversation cache: dropped \d+ superseded .*?parked=(\d+)")
     READ_MAX = 1 << 20                                  # at most the last MiB of new lines per read
 
@@ -519,7 +519,7 @@ class ConvCacheLog:
 
     def reset(self):
         self.state = {"parked": 0, "bytes": 0, "evictions": 0, "parks": 0, "restores": 0, "last_event": None,
-                      "last_tokens": None, "last_at": None}
+                      "last_tokens": None, "last_at": None, "snapshot_bytes": None, "snapshot_tokens": None}
 
     def poll(self, path, start) -> dict:
         """The state after the log's new lines; `start` is where the engine's current run began in it."""
@@ -551,6 +551,8 @@ class ConvCacheLog:
                 st["parked"], st["bytes"] = int(m.group(3)), int(m.group(4))
                 if m.group(5) is not None:
                     st["evictions"] = int(m.group(5))
+                if m.group(6) is not None:
+                    st["snapshot_bytes"], st["snapshot_tokens"] = int(m.group(6)), int(m.group(2))
                 if m.group(1) != "skipped":
                     st["parks" if m.group(1) == "parked" else "restores"] += 1
                     st["last_event"], st["last_tokens"], st["last_at"] = m.group(1), int(m.group(2)), now
@@ -763,6 +765,7 @@ class StrataEngine:
         # the slot that has its start (the engine checks it again); when the slot was last used
         self.slot_held: list[list[int]] = [[] for _ in range(self.batch)]
         self.slot_used = [0.0] * self.batch
+        self.slot_ctx = [0] * self.batch
         self.slot_live: list[dict | None] = [None] * self.batch   # /metrics: the request in each slot
         # #1012: the admission state belongs to the server, not to one engine process.  restart() runs this again
         # while requests still wait on it (they hold these very objects), so it is made once and kept: new ones
@@ -1279,6 +1282,10 @@ class StrataEngine:
         with self.slot_cv:
             return any(e[0] * 2 <= plen for e in self.wait_lens)
 
+    def note_request_status(self, st) -> None:
+        """Record this thread's request status, so a batch admission carries it and /metrics can show each slot's phase."""
+        self.__dict__.setdefault("_tl", threading.local()).st = st
+
     def generate_batched(self, ids, max_new, sampling, cancel, embeddings=None):
         """--batch.  Alone (no slot busy, nobody waiting): the solo path (GEN, with drafts: the fastest stream)
         - and when another request arrives meanwhile, this one is STOPped and continues in a batch slot (BGEN with
@@ -1318,6 +1325,14 @@ class StrataEngine:
                 with self.slot_cv:
                     alone = not any(self.slot_busy) and self.waiting == 0
                 if alone and left > 1:
+                    with self.slot_cv:                      # hold a slot so a solo prefill shows, and a second request
+                        reserved = self.pick_slot(prompt)   # sees it busy and takes the batch path into the other
+                        if reserved is not None:
+                            self.slot_busy[reserved] = True
+                            self.slot_claims.add(reserved)
+                            self.slot_live[reserved] = {"slot": reserved, "state": "reading", "prompt_tokens": len(prompt),
+                                                        "generated": 0, "started": time.time(), "first_token": None,
+                                                        "_st": getattr(self.__dict__.get("_tl"), "st", None)}
                     head = f"GENI {left}{keys} {embeddings}" if embeddings else f"GEN {left}{keys}"
                     self._last_done = None                  # (#879: this request's DONE decides below)
                     self._send(f"{head} {','.join(str(int(t)) for t in prompt)}")
@@ -1331,15 +1346,22 @@ class StrataEngine:
                         while pending:
                             t = pending.pop(0)
                             out.append(t)
+                            if reserved is not None:        # keep the held slot current, as the batch path does at 1487
+                                sv = self.slot_live[reserved]
+                                if sv is not None:
+                                    if sv["first_token"] is None:
+                                        sv["first_token"] = time.time()
+                                        sv["state"] = "decoding"
+                                    sv["generated"] = len(out)
                             yield t
                         if x is None:                       # a heartbeat (False: a token, flushed above)
-                            if (reserved is None and not out and not embeddings and yields < self.YIELDS_MAX and
-                                    self._shorter_waiting(len(prompt))):
-                                with self.slot_cv:          # the slot the part read will wait in
-                                    reserved = self.pick_slot(prompt)
-                                    if reserved is not None:
-                                        self.slot_busy[reserved] = True
-                                        self.slot_claims.add(reserved)
+                            if not out and not embeddings and yields < self.YIELDS_MAX and self._shorter_waiting(len(prompt)):
+                                if reserved is None:        # the slot the part read will wait in
+                                    with self.slot_cv:
+                                        reserved = self.pick_slot(prompt)
+                                        if reserved is not None:
+                                            self.slot_busy[reserved] = True
+                                            self.slot_claims.add(reserved)
                                 if reserved is not None:
                                     self._send(f"BYIELD {reserved}")
                             yield None
@@ -1357,6 +1379,7 @@ class StrataEngine:
                             self.slot_busy[reserved] = False
                             self.slot_claims.discard(reserved)
                             self.slot_cv.notify_all()
+                        self.slot_live[reserved] = None
                         reserved = None
                     if slot is None:
                         finish = (self.last or {}).get("finish") if isinstance(self.last, dict) else None
@@ -1381,6 +1404,9 @@ class StrataEngine:
                                 if slot is not None:
                                     self.slot_busy[slot] = True
                                     self.slot_claims.add(slot)
+                                    self.slot_live[slot] = {"slot": slot, "state": "reading", "prompt_tokens": len(prompt),
+                                                            "generated": 0, "started": time.time(), "first_token": None,
+                                                            "_st": getattr(self.__dict__.get("_tl"), "st", None)}
                                     if admit_wait:
                                         admit_wait = False
                                         self.admitting = max(0, self.admitting - 1)
@@ -1427,9 +1453,11 @@ class StrataEngine:
                     while not self.slot_q[slot].empty():
                         self.slot_q[slot].get_nowait()
                     head = f"BGENI {slot} {left}{keys} {embeddings}" if embeddings else f"BGEN {slot} {left}{keys}"
-                    live = {"slot": slot, "state": "reading", "prompt_tokens": len(prompt), "generated": 0,
-                            "started": time.time(), "first_token": None}
+                    live = self.slot_live[slot] or {"slot": slot, "state": "reading", "prompt_tokens": len(prompt),
+                                                    "generated": 0, "started": time.time(), "first_token": None,
+                                                    "_st": getattr(self.__dict__.get("_tl"), "st", None)}
                     self.slot_live[slot] = live
+                    self.slot_ctx[slot] = len(prompt)
                     self._last_done = None                  # (#879: this admission's DONE decides below)
                     self._send(f"{head} {','.join(str(int(t)) for t in prompt)}")
                     self.slot_held[slot] = []               # the admission overwrites what the slot held
@@ -1482,6 +1510,7 @@ class StrataEngine:
                         t = int(line.split()[2])
                         out.append(t)
                         live["generated"] = len(out)
+                        self.slot_ctx[slot] = live["prompt_tokens"] + len(out)
                         if cancel.is_set():
                             if not stop_sent:
                                 self._send(f"BSTOP {slot}")
@@ -1557,6 +1586,7 @@ class StrataEngine:
                     self.slot_busy[reserved] = False
                     self.slot_claims.discard(reserved)
                     self.slot_cv.notify_all()
+                self.slot_live[reserved] = None             # a solo that held a slot for display but never entered one
             if slot is not None:
                 self.slot_live[slot] = None
                 self.slot_used[slot] = time.time()
@@ -1620,10 +1650,13 @@ class StrataEngine:
         for b in range(self.batch):
             r = self.slot_live[b]
             if r is None:
-                view.append({"slot": b, "state": "idle", "held_tokens": len(self.slot_held[b])})
+                view.append({"slot": b, "state": "idle", "held_tokens": len(self.slot_held[b]),
+                             "context_tokens": self.slot_ctx[b]})
                 continue
             ft = r.get("first_token")
-            view.append({"slot": b, "state": r["state"], "prompt_tokens": r["prompt_tokens"],
+            state = "generating" if r["state"] == "decoding" else r["state"]
+            phase = (r.get("_st") or {}).get("phase")
+            view.append({"slot": b, "state": state, "phase": phase, "prompt_tokens": r["prompt_tokens"],
                          "generated": r["generated"], "elapsed_s": round(now - r["started"], 1),
                          "tok_s": round(r["generated"] / max(1e-6, now - ft), 1) if ft else None})
         return view
@@ -3334,6 +3367,41 @@ class Service:
                     | {"wallclock_s": r.get("wallclock_s", round(time.perf_counter() - r["_clock"], 3))}
                     for r in reversed(records)]
 
+    def _memory(self, hw: dict, parked: dict) -> dict:
+        """GET /metrics' "memory": the Monitor's RAM / VRAM breakdown. Figures are measured (process RSS through
+        psutil) or reported by the engine (arena, expert cache, conversation cache). A slot's KV bytes are only shown
+        when the engine reports them (`kv_bytes`/`kv_exact`); there is no estimate, which was wildly off."""
+        eng = getattr(self.engine, "info", {}) or {}
+        mib = lambda n: (n or 0) * 1048576
+        arena, expert_cache, vram_free = mib(eng.get("arena_mib")), mib(eng.get("expert_cache_mib")), mib(eng.get("vram_free_mib"))
+
+        def rss(pid):
+            if pid is None:
+                return None
+            try:
+                import psutil
+                return int(psutil.Process(pid).memory_info().rss)
+            except Exception:  # noqa: BLE001 - psutil missing, the process gone, no permission: no reading
+                return None
+
+        engine_rss = rss(getattr(getattr(self.engine, "proc", None), "pid", None))
+        vision_rss = rss(getattr(getattr(self.vision, "proc", None), "pid", None)) if self.vision is not None else None
+        slots = []
+        for s in (self.engine.slots_view() if hasattr(self.engine, "slots_view") else []):
+            tokens = (s.get("context_tokens") or s.get("held_tokens") or 0) if s["state"] == "idle" \
+                else (s.get("prompt_tokens") or 0) + (s.get("generated") or 0)
+            slots.append({"slot": s["slot"], "state": s["state"], "tokens": tokens,
+                          "kv_bytes": s.get("kv_bytes"), "kv_exact": bool(s.get("kv_exact"))})
+        gpu_total = hw.get("gpu_mem_total")
+        return {"ram_total": hw.get("ram_total"), "ram_used": hw.get("ram_used"),
+                "arena_bytes": arena or None, "expert_cache_bytes": expert_cache or None,
+                "vram_free_bytes": vram_free or None, "gpu_mem_total": gpu_total, "gpu_mem_used": hw.get("gpu_mem_used"),
+                "unified": bool(gpu_total and expert_cache > gpu_total),
+                "conv_bytes": int(parked.get("bytes") or 0) or None, "conv_parked": parked.get("parked"),
+                "conv_budget_bytes": mib(eng.get("conversation_cache_mib")) or None,
+                "engine_rss": engine_rss, "vision_bytes": vision_rss, "server_bytes": rss(os.getpid()),
+                "slots": slots}
+
     def metrics(self, all_requests=False) -> dict:
         """GET /metrics: what the Monitor tab shows - the engine's facts, what it is doing, the last requests, and
         the hardware (with a minute of history per series)."""
@@ -3385,6 +3453,7 @@ class Service:
         return {"engine": engine, "live": live, "requests": hist[::-1][:None if all_requests else 12],
                 "conversation_cache": conversation_cache_view(engine, hist, totals, parked),
                 "requests_kept": len(hist), "totals": totals, "hardware": tel["now"],
+                "memory": self._memory(tel["now"], parked),
                 "hardware_static":
                 tel["static"], "history": tel["history"], "time": now}
 
@@ -3868,6 +3937,8 @@ class Service:
                     while True:
                         segment_before = getattr(self.engine, "last", None)
                         segments_before = len(segments)     # (#879: a pass sent again leaves no segment)
+                        if hasattr(self.engine, "note_request_status"):
+                            self.engine.note_request_status(st)
                         gen = self.engine.generate(prompt, max_new - n, sampling, cancel, embeddings=emb) if emb \
                             else self.engine.generate(prompt, max_new - n, sampling, cancel)
                         recover_prompt = None

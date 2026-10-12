@@ -28,9 +28,9 @@
     <button class="st-tab" role="tab" id="tab-btn-about" aria-controls="view-about" aria-selected="false" data-tab="about">
       <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-info"/></svg>About</button>
   </nav>
-  <span class="st-header__spacer"></span>
-  <span class="st-pill" id="pill" data-state="idle" role="status" aria-live="polite">
-    <span class="st-pill__dot"></span><span id="pill-text">Connecting&hellip;</span></span>
+  <span class="st-pills" id="pills" role="status" aria-live="polite">
+    <span class="st-pill" data-state="idle"><span class="st-pill__dot"></span><span class="st-pill__text">Connecting&hellip;</span></span>
+  </span>
   <button class="st-btn st-btn--icon" id="theme-btn" title="Light / dark" aria-label="Switch between light and dark">
     <svg class="st-icon"><use id="theme-icon" href="web/sprite.svg#i-moon"/></svg></button>
 </header>
@@ -85,8 +85,11 @@
             <span class="st-badge st-badge--error" data-s="error">Error</span>
           </span>
         </div>
-        <div class="state-card__row"><span id="state-label">Waiting for a request</span><span class="muted" id="state-detail"></span></div>
-        <div class="st-progress" id="state-progress"><div class="st-progress__bar" id="state-bar" style="width:0%"></div></div>
+        <div id="state-single">
+          <div class="state-card__row"><span id="state-label">Waiting for a request</span><span class="muted" id="state-detail"></span></div>
+          <div class="st-progress" id="state-progress"><div class="st-progress__bar" id="state-bar" style="width:0%"></div></div>
+        </div>
+        <div class="state-slots" id="state-slots" hidden></div>
       </div>
 
       <div class="metrics" id="metrics">
@@ -96,7 +99,7 @@
       <div class="monitor-row">
         <div class="st-card ctx-card">
           <span class="card-title">Context fill</span>
-          <div class="ctx-gauge">
+          <div class="ctx-gauge" id="ctx-single">
             <svg class="st-gauge" viewBox="0 0 120 120" aria-hidden="true">
               <circle class="st-gauge__track" cx="60" cy="60" r="50" fill="none" stroke-width="10" stroke-linecap="round"
                       stroke-dasharray="235.6 314.2" transform="rotate(135 60 60)"/>
@@ -105,10 +108,17 @@
             </svg>
             <div class="ctx-gauge__label"><span class="ctx-gauge__pct" id="ctx-pct">0%</span><span class="muted" id="ctx-sub">&ndash;</span></div>
           </div>
-          <div class="bar-row"><span>Experts in VRAM</span><span class="muted" id="slots-text">&ndash;</span></div>
-          <div class="st-progress"><div class="st-progress__bar" id="slots-bar" style="width:0%"></div></div>
-          <div class="bar-row"><span>System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
-          <div class="st-progress" id="ram-progress"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div></div>
+          <div class="ctx-slots" id="ctx-slots" hidden></div>
+          <div class="mem-group">
+            <div class="bar-row"><span>System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
+            <div class="mem-bar" id="ram-bar" role="img" aria-label="System RAM in use, split by what holds it"></div>
+            <div class="mem-legend" id="ram-legend"></div>
+          </div>
+          <div class="mem-group" id="vram-group">
+            <div class="bar-row"><span>VRAM</span><span class="muted" id="slots-text">&ndash;</span></div>
+            <div class="mem-bar" id="vram-bar" role="img" aria-label="Model memory on the graphics card, split by type"></div>
+            <div class="mem-legend" id="vram-legend"></div>
+          </div>
           <div class="bar-row"><span>GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
           <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div></div>
         </div>
@@ -239,6 +249,7 @@
 </aside>
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
+<div class="st-tip" id="tip" role="tooltip" hidden></div>
 <script src="web/app.js"></script>
 </body>
 </html>

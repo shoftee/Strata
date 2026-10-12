@@ -220,6 +220,7 @@ class PickSlot(unittest.TestCase):
         e.slot_held = [[] for _ in range(n)]
         e.slot_used = [0.0] * n
         e.slot_live = [None] * n
+        e.slot_ctx = [0] * n
         e.slot_group = [0] * n
         return e
 
@@ -258,9 +259,9 @@ class PickSlot(unittest.TestCase):
         e.slot_live[0] = {"slot": 0, "state": "decoding", "prompt_tokens": 9, "generated": 4,
                           "started": time.time() - 2, "first_token": time.time() - 1}
         v = e.slots_view()
-        self.assertEqual(v[0]["state"], "decoding")
+        self.assertEqual(v[0]["state"], "generating")            # the view reports a decoding slot as generating
         self.assertEqual(v[0]["generated"], 4)
-        self.assertEqual(v[1], {"slot": 1, "state": "idle", "held_tokens": 2})
+        self.assertEqual(v[1], {"slot": 1, "state": "idle", "held_tokens": 2, "context_tokens": 0})
 
 
 class ParallelService(unittest.TestCase):

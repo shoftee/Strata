@@ -257,5 +257,59 @@ class ConversationCacheCard(unittest.TestCase):
             self.assertIn(f'"{el}"', js)
 
 
+class MemoryBreakdown(unittest.TestCase):
+    """The Monitor's RAM / VRAM breakdown: /metrics' "memory" carries measured (process RSS) and engine-reported
+    figures; the web app splits each bar into one coloured segment per type, with a per-item tooltip."""
+
+    HW = {"ram_total": 128 * 2**30, "ram_used": 100 * 2**30, "gpu_mem_used": 20 * 2**30, "gpu_mem_total": 24 * 2**30}
+    PARKED = {"parked": 3, "bytes": 5 * 2**30, "snapshot_bytes": 1024 * 2**20, "snapshot_tokens": 4096}   # 262144 B/token
+
+    def service(self):
+        tok = ByteTokenizer()
+        engine = MockEngine(tok, "ok", max_context=4096)
+        engine.info = {"arena_mib": 40960, "expert_cache_mib": 20480, "vram_free_mib": 4096, "conversation_cache_mib": 8192}
+        return Service(engine, tok, ChatTemplate(Path(__file__).parent / "chat_template.jinja"))
+
+    def test_the_figures_and_the_unified_flag(self):
+        svc = self.service()
+        m = svc._memory(self.HW, self.PARKED)
+        self.assertEqual(m["arena_bytes"], 40960 * 2**20)
+        self.assertEqual(m["expert_cache_bytes"], 20480 * 2**20)
+        self.assertEqual(m["conv_bytes"], 5 * 2**30)
+        self.assertFalse(m["unified"])                             # a 20 GiB cache fits a 24 GiB card: discrete
+        # a card whose own VRAM cannot hold the cache is a shared-memory box: the device memory joins the RAM bar
+        m2 = svc._memory({**self.HW, "gpu_mem_total": 512 * 2**20}, self.PARKED)
+        self.assertTrue(m2["unified"])
+
+    def test_slots_report_their_tokens_without_a_kv_estimate(self):
+        svc = self.service()
+        svc.engine.slots_view = lambda: [{"slot": 0, "state": "idle", "held_tokens": 1000},
+                                         {"slot": 1, "state": "decoding", "prompt_tokens": 500, "generated": 20}]
+        slots = svc._memory(self.HW, self.PARKED)["slots"]
+        self.assertEqual([(s["tokens"], s["kv_bytes"], s["kv_exact"]) for s in slots],
+                         [(1000, None, False), (520, None, False)])
+
+    def test_metrics_carries_memory(self):
+        svc = self.service()
+        httpd = serve(svc, port=0)
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            with urllib.request.urlopen(base + "/metrics", timeout=10) as r:
+                mem = json.loads(r.read())["memory"]
+            self.assertEqual(mem["arena_bytes"], 40960 * 2**20)
+            self.assertIn("slots", mem)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_the_bars_are_on_the_page(self):
+        web = Path(__file__).parent / "web"
+        html, js = (web / "index.html").read_text(encoding="utf-8"), (web / "app.js").read_text(encoding="utf-8")
+        for el in ("ram-bar", "ram-legend", "vram-bar", "vram-legend", "ctx-slots", "state-slots", "tip"):
+            self.assertIn(f'id="{el}"', html)
+            self.assertIn(f'"{el}"', js)
+        self.assertIn("renderMemory", js)                          # the JS builds the stacked bars from "memory"
+
+
 if __name__ == "__main__":
     unittest.main()

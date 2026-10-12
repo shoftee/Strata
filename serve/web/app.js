@@ -152,6 +152,10 @@ function setMetric(key, value, unit, sub) {
 
 let lastMetrics = null, metricsFailures = 0, keyWarned = false, mcpTick = 0;
 let reqShowAll = false;   // the Monitor's request table: the last 12, or every one the server keeps (issue #35)
+// keep the multi-slot view (the header pills and the monitor's slot rows) briefly after running drops below 2, so a
+// request ending and the next starting does not flicker the view back to single
+const MULTI_HOLD_MS = 2000;
+let lastMultiAt = 0;
 async function poll() {
   try {
     const r = await fetch(reqShowAll ? "metrics?requests=all" : "metrics", {headers: headers()});
@@ -172,15 +176,21 @@ async function poll() {
   setTimeout(poll, 1000);
 }
 
-function setPill(state, text) {
-  $("pill").dataset.state = state === "error" ? "queued" : state;
-  $("pill-text").textContent = text;
-}
+const pillHtml = (state, text) =>
+  `<span class="st-pill" data-state="${state === "error" ? "queued" : state}"><span class="st-pill__dot"></span><span class="st-pill__text">${esc(text)}</span></span>`;
 
-function render(m) {
-  const live = m.live || {}, hw = m.hardware || {}, st = m.hardware_static || {}, eng = m.engine || {}, h = m.history || {};
-  const last = (m.requests || [])[0];
-  // the header pill
+function setPill(state, text) { $("pills").innerHTML = pillHtml(state, text); }
+
+// the header pills: one per running slot when several requests run together, one for the whole engine otherwise
+function renderPills(live, multi) {
+  if (multi) {
+    const pills = (live.slots || []).filter((s) => s.state !== "idle").map((s) => s.state === "reading"
+      ? pillHtml("reading", `Reading prompt${live.prompt_total ? ` · ${Math.round((100 * live.prompt_read) / live.prompt_total)}%` : ""}`)
+      : pillHtml("generating", `${s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "Generating"}${s.tok_s ? ` · ${fmt(s.tok_s, 1)} tok/s` : ""}`));
+    if (live.queued > 0) pills.push(pillHtml("queued", `${live.queued} queued`));
+    $("pills").innerHTML = pills.join("") || pillHtml("idle", "Idle");
+    return;
+  }
   if (live.state === "reading") {
     const pct = live.prompt_total ? Math.round((100 * live.prompt_read) / live.prompt_total) : null;
     setPill("reading", pct != null ? `Reading prompt · ${pct}%` : "Reading prompt");
@@ -190,7 +200,17 @@ function render(m) {
     setPill("idle", "Idle");
   }
   if (live.queued > 0) setPill("queued", `${live.queued} queued`);
-  if (tab === "monitor") renderMonitor(live, hw, st, eng, h, last, m.requests || [], m.totals, m.requests_kept);
+}
+
+function render(m) {
+  const live = m.live || {}, hw = m.hardware || {}, st = m.hardware_static || {}, eng = m.engine || {}, h = m.history || {};
+  const last = (m.requests || [])[0];
+  // the header pill(s): one per running slot when several run together, held briefly so a turn boundary does not flicker
+  const nowMs = Date.now();
+  if ((live.running || 0) >= 2) lastMultiAt = nowMs;
+  const multi = (live.running || 0) >= 2 || nowMs - lastMultiAt < MULTI_HOLD_MS;
+  renderPills(live, multi);
+  if (tab === "monitor") renderMonitor(live, hw, st, eng, h, last, m.requests || [], m.totals, m.requests_kept, m.memory, multi);
   if (tab === "monitor") renderConvCache(m.conversation_cache);
   if (tab === "about") renderAbout(eng, hw, st);
 }
@@ -237,33 +257,174 @@ function renderTotals(t) {
   return `Since ${since}: ${fmt(t.requests)} requests · ${fmt(read)} prompt tokens read${pSpeed} (${fmt(t.reused)} reused) · ` +
          `${fmt(t.output_tokens)} written${oSpeed}`;
 }
-function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
-  // model state
-  const on = live.queued > 0 ? "queued" : live.state;
-  for (const b of document.querySelectorAll("#state-badges .st-badge")) b.classList.toggle("on", b.dataset.s === on || b.dataset.s === live.state);
-  const prog = $("state-progress");
-  let label = "Waiting for a request", detail = "", pct = 0;
-  if (live.state === "reading") {
-    label = "Reading prompt";
-    prog.dataset.tone = "info";
-    if (live.prompt_total) {
-      pct = (100 * live.prompt_read) / live.prompt_total;
-      detail = `${fmt(live.prompt_read)} / ${fmt(live.prompt_total)} tokens · ${fmt(pct)}%`;
-    } else {
-      detail = `${fmt(live.prompt_tokens)} tokens`;
-    }
-  } else if (live.state === "generating") {
-    label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : "Generating";
-    delete prog.dataset.tone;
-    pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : 0;
-    detail = `${fmt(live.generated)} tokens · ${fmt(live.tok_s, 1)} tok/s`;
-  } else if (last) {
-    delete prog.dataset.tone;
-    detail = `last: ${fmt(last.output_tokens)} tokens${last.decode_tok_s ? ` at ${fmt(last.decode_tok_s, 1)} tok/s` : ""}`;
+// ------------------------------------------------------------------ Monitor: memory breakdown + per-slot views
+// one hue per memory type (the --st-mem-* colours in app.css); a segment's kind picks its colour and tooltip
+const MEM_COLOR = {experts: "experts", gpu: "gpu", engine: "engine", conv: "conv", vision: "vision",
+                   server: "server", system: "system", expertcache: "experts", slots: "gpu"};
+const memColor = (kind) => `var(--st-mem-${MEM_COLOR[kind] || "system"})`;
+const bytesStr = (b) => (b == null ? "–" : `${gb(b, 2)} GB`);
+// a tooltip's inner HTML: a bold head, label/value rows, an optional note (values are already display strings)
+function tipHtml(head, rows, note) {
+  return `<div class="tip-head">${esc(head)}</div>` +
+    (rows || []).filter((r) => r && r[1] != null).map(([a, b]) => `<div class="tip-row"><span>${esc(a)}</span><span>${esc(b)}</span></div>`).join("") +
+    (note ? `<div class="tip-note">${esc(note)}</div>` : "");
+}
+
+// one floating tooltip, shown for whatever [data-tip] the pointer or keyboard is on. the bars are rebuilt every
+// second, so while a tip is up (tipHover) the render functions skip their rebuild and the element under the cursor stays
+let tipHover = false;
+function showTip(html, x, y) { const t = $("tip"); t.innerHTML = html; t.hidden = false; moveTip(x, y); requestAnimationFrame(() => { if (!t.hidden) t.dataset.show = "1"; }); }
+function moveTip(x, y) {
+  const t = $("tip"); if (t.hidden) return;
+  const r = t.getBoundingClientRect();
+  let left = x + 12, top = y - r.height - 10;
+  if (left + r.width > innerWidth - 8) left = x - r.width - 12;
+  if (left < 8) left = 8;
+  if (top < 8) top = y + 18;
+  t.style.left = `${left}px`; t.style.top = `${top}px`;
+}
+function hideTip() { const t = $("tip"); t.dataset.show = "0"; setTimeout(() => { if (t.dataset.show === "0") t.hidden = true; }, 140); }
+document.addEventListener("pointerover", (e) => { const el = e.target.closest("[data-tip]"); if (!el) return; tipHover = true; showTip(el.dataset.tip, e.clientX, e.clientY); });
+document.addEventListener("pointermove", (e) => { if (tipHover && !$("tip").hidden) moveTip(e.clientX, e.clientY); });
+document.addEventListener("pointerout", (e) => {
+  const el = e.target.closest("[data-tip]"); if (!el) return;
+  if (e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-tip]") === el) return;
+  tipHover = false; hideTip();
+});
+document.addEventListener("focusin", (e) => { const el = e.target.closest("[data-tip]"); if (!el) return; tipHover = true; const r = el.getBoundingClientRect(); showTip(el.dataset.tip, r.left + r.width / 2, r.top); });
+document.addEventListener("focusout", (e) => { if (e.target.closest("[data-tip]")) { tipHover = false; hideTip(); } });
+window.addEventListener("scroll", () => { if (!$("tip").hidden) hideTip(); }, true);
+
+// one stacked bar + its legend; each segment and legend row carries the same tooltip
+function drawMemBar(barEl, legendEl, total, segs) {
+  const denom = Math.max(total, segs.reduce((a, s) => a + s.bytes, 0), 1);
+  barEl.innerHTML = segs.map((s) => `<button class="mem-seg" style="width:${((100 * s.bytes) / denom).toFixed(2)}%;background:${memColor(s.kind)}" ` +
+    `data-tip="${esc(s.tip)}" tabindex="0" aria-label="${esc(`${s.label}: ${gb(s.bytes)} GB`)}"></button>`).join("");
+  legendEl.innerHTML = segs.map((s) => `<button class="mem-legend__row" data-tip="${esc(s.tip)}" tabindex="0">` +
+    `<span class="mem-dot" style="background:${memColor(s.kind)}"></span>` +
+    `<span class="mem-legend__label">${esc(s.label)}</span><span class="mem-legend__val">${esc(s.val || `${gb(s.bytes)} GB`)}</span></button>`).join("");
+}
+function slotKvTip(mem) {
+  const rows = (mem.slots || []).filter((s) => s.kv_bytes).map((s) => [`Slot ${s.slot}`, `${gb(s.kv_bytes, 2)} GB · ${fmt(s.tokens)} tok`]);
+  return tipHtml("Slot contexts (KV)", rows,
+    (mem.slots || []).some((s) => s.kv_bytes && !s.kv_exact) ? "Estimated from the conversation cache's bytes per token; the engine will report each slot exactly." : null);
+}
+// the two stacked bars: system RAM split by what holds it, and the card's memory split by type
+function renderMemory(mem, eng) {
+  if (!mem || tipHover) return;
+  const arena = mem.arena_bytes || 0, conv = mem.conv_bytes || 0, vision = mem.vision_bytes || 0, server = mem.server_bytes || 0;
+  const engineRss = mem.engine_rss || 0, expertCache = mem.expert_cache_bytes || 0;
+  const kvTotal = (mem.slots || []).reduce((a, s) => a + (s.kv_bytes || 0), 0);
+  const engineRuntime = Math.max(0, engineRss - arena - conv);
+  const gpuMem = expertCache + kvTotal;   // the card's device memory: expert cache + the running slots' KV
+  const segs = [];
+  if (arena) segs.push({kind: "experts", label: "Model experts in RAM", bytes: arena,
+    tip: tipHtml("Model experts in RAM", [["Resident", bytesStr(arena)]], "The expert weights the engine keeps in system RAM (its arena).")});
+  if (mem.unified && gpuMem) {
+    const grows = [["Expert cache", bytesStr(expertCache)]];
+    if (kvTotal) grows.push(["Slot contexts (KV)", bytesStr(kvTotal)]);
+    segs.push({kind: "gpu", label: "On the graphics card", bytes: gpuMem,
+      tip: tipHtml("Model memory on the graphics card", grows, "This machine shares one pool of RAM, so the card's memory counts as System RAM.")});
   }
-  $("state-label").textContent = label;
-  $("state-detail").textContent = detail;
-  $("state-bar").style.width = `${pct}%`;
+  if (conv) segs.push({kind: "conv", label: "Conversation cache", bytes: conv,
+    tip: tipHtml("Conversation cache", [["Parked now", bytesStr(conv)], ["Conversations", fmt(mem.conv_parked)], ["Budget", bytesStr(mem.conv_budget_bytes)]], "Whole conversations parked in RAM so a follow-up reuses them.")});
+  const strataOther = engineRuntime + vision + server;
+  if (strataOther) {
+    const rows = [];
+    if (engineRuntime) rows.push(["Engine residuals", bytesStr(engineRuntime)]);
+    if (vision) rows.push(["Vision encoder", bytesStr(vision)]);
+    if (server) rows.push(["Strata server", bytesStr(server)]);
+    segs.push({kind: "engine", label: "Strata (other)", bytes: strataOther,
+      tip: tipHtml("Strata (other)", rows, "Everything Strata holds in RAM besides the expert arena and the parked conversations: the engine's other memory (non-expert weights, KV buffers, runtime), the vision encoder and the web server.")});
+  }
+  const accounted = arena + conv + engineRuntime + vision + server + (mem.unified ? gpuMem : 0);
+  const other = Math.max(0, (mem.ram_used || 0) - accounted);
+  if (other) segs.push({kind: "system", label: "System & other apps", bytes: other,
+    tip: tipHtml("System & other apps", [["RAM in use", bytesStr(mem.ram_used)], ["Strata's parts", bytesStr(accounted)]], "The operating system, drivers and other programs: what is left of RAM in use once Strata's parts are subtracted.")});
+  drawMemBar($("ram-bar"), $("ram-legend"), mem.ram_total || 0, segs);
+
+  const vramTotal = Math.max(mem.gpu_mem_total || 0, expertCache + (mem.vram_free_bytes || 0));
+  const vsegs = [];
+  if (expertCache) vsegs.push({kind: "expertcache", label: "Expert cache", bytes: expertCache,
+    val: eng && eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(expertCache)} GB` : null,
+    tip: tipHtml("Expert cache in VRAM", [["Resident", bytesStr(expertCache)]], "The experts kept on the card for fast lookup.")});
+  if (kvTotal) vsegs.push({kind: "slots", label: "Slot contexts (KV)", bytes: kvTotal, tip: slotKvTip(mem)});
+  drawMemBar($("vram-bar"), $("vram-legend"), vramTotal, vsegs);
+}
+// the running slots' context fill, one row each (the single gauge is for one context)
+function renderCtxSlots(live, eng, mem) {
+  if (tipHover) return;
+  const ctx = eng.max_context || 0;
+  const kv = {}; (mem && mem.slots || []).forEach((s) => { kv[s.slot] = s; });
+  const color = {reading: "var(--st-info)", generating: "var(--st-accent)"};
+  $("ctx-slots").innerHTML = (live.slots || []).map((s) => {
+    const used = s.state === "idle" ? (s.context_tokens || s.held_tokens || 0) : (s.prompt_tokens || 0) + (s.generated || 0);
+    const frac = ctx ? Math.min(1, used / ctx) : 0;
+    const k = kv[s.slot];
+    const tip = tipHtml(`Slot ${s.slot} · ${s.state}`,
+      [["Context", ctx ? `${fmt(used)} / ${fmt(ctx)} tokens` : `${fmt(used)} tokens`],
+       k && k.kv_bytes ? ["KV footprint", `${gb(k.kv_bytes, 2)} GB${k.kv_exact ? "" : " (est.)"}`] : null,
+       s.tok_s ? ["Speed", `${fmt(s.tok_s, 1)} tok/s`] : null]);
+    return `<div class="ctx-slot" data-tip="${esc(tip)}" tabindex="0"><span class="ctx-slot__name">Slot ${s.slot}</span>` +
+      `<div class="ctx-slot__bar"><div style="width:${(frac * 100).toFixed(1)}%;background:${color[s.state] || "var(--st-mem-system)"}"></div></div>` +
+      `<span class="ctx-slot__val">${kfmt(used)}${ctx ? ` / ${ctxfmt(ctx)}` : ""}</span></div>`;
+  }).join("");
+}
+// the running slots' state, one row each, when several requests run together
+function renderStateSlots(live) {
+  if (tipHover) return;
+  const name = {reading: "Reading prompt", generating: "Generating", idle: "Idle"};
+  $("state-slots").innerHTML = (live.slots || []).map((s) => {
+    const active = s.state !== "idle";
+    const label = s.state === "generating" && s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : (name[s.state] || s.state);
+    const reading = s.state === "reading" && live.prompt_total ? Math.min(100, (100 * live.prompt_read) / live.prompt_total) : null;
+    const pct = s.state === "generating" && live.max_tokens ? Math.min(100, (100 * (s.generated || 0)) / live.max_tokens)
+      : reading != null ? reading : (active ? 100 : 0);
+    const detail = s.state === "generating" ? `${fmt(s.generated || 0)} tok${s.tok_s ? ` · ${fmt(s.tok_s, 1)} t/s` : ""}`
+      : reading != null ? `${fmt(live.prompt_read)} / ${fmt(live.prompt_total)} tok`
+      : active ? `${fmt(s.prompt_tokens || 0)} tok`
+      : `${fmt(s.context_tokens || s.held_tokens || 0)} tok`;
+    return `<div class="state-slot"><span class="state-slot__name">Slot ${s.slot}</span>` +
+      `<div class="state-slot__mid"><div class="state-slot__top"><span>${esc(label)}</span>` +
+      `<span class="state-slot__val">${esc(detail)}</span></div>` +
+      `<div class="st-progress"><div class="st-progress__bar" style="width:${pct}%;${s.state === "reading" ? "background:var(--st-info)" : ""}"></div></div></div></div>`;
+  }).join("");
+}
+
+function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, mem, multiSlot) {
+  // model state
+  const lit = new Set(multiSlot ? (live.slots || []).map((s) => s.state) : [live.state]);
+  if (live.queued > 0) lit.add("queued");
+  for (const b of document.querySelectorAll("#state-badges .st-badge")) b.classList.toggle("on", lit.has(b.dataset.s));
+  $("state-single").hidden = multiSlot;
+  $("state-slots").hidden = !multiSlot;
+  if (multiSlot) {
+    renderStateSlots(live);
+  } else {
+    const prog = $("state-progress");
+    let label = "Waiting for a request", detail = "", pct = 0;
+    if (live.state === "reading") {
+      label = "Reading prompt";
+      prog.dataset.tone = "info";
+      if (live.prompt_total) {
+        pct = (100 * live.prompt_read) / live.prompt_total;
+        detail = `${fmt(live.prompt_read)} / ${fmt(live.prompt_total)} tokens · ${fmt(pct)}%`;
+      } else {
+        detail = `${fmt(live.prompt_tokens)} tokens`;
+      }
+    } else if (live.state === "generating") {
+      label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : "Generating";
+      delete prog.dataset.tone;
+      pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : 0;
+      detail = `${fmt(live.generated)} tokens · ${fmt(live.tok_s, 1)} tok/s`;
+    } else if (last) {
+      delete prog.dataset.tone;
+      detail = `last: ${fmt(last.output_tokens)} tokens${last.decode_tok_s ? ` at ${fmt(last.decode_tok_s, 1)} tok/s` : ""}`;
+    }
+    $("state-label").textContent = label;
+    $("state-detail").textContent = detail;
+    $("state-bar").style.width = `${pct}%`;
+  }
 
   // the eight cards
   const speed = live.state === "generating" ? live.tok_s : last ? last.decode_tok_s : null;
@@ -306,23 +467,28 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   }
   spark("sp-disk", h.disk_read_mb);
 
-  // context fill: the running request, else the last one
+  // context fill: one gauge for a single context, one row per slot when several run together
   const ctx = eng.max_context || 0;
-  let used = 0;
-  if (live.state !== "idle") used = (live.prompt_tokens || 0) + (live.generated || 0);
-  else if (last) used = (last.prompt_tokens || 0) + (last.output_tokens || 0);
-  const frac = ctx ? Math.min(1, used / ctx) : 0;
-  $("ctx-fill").setAttribute("stroke-dasharray", `${(235.6 * frac).toFixed(1)} 314.2`);
-  $("ctx-fill").style.opacity = 235.6 * frac >= 3 ? "1" : "0";         // a near-zero arc would draw just its round cap
-  $("ctx-pct").textContent = `${Math.round(frac * 100)}%`;
-  $("ctx-sub").textContent = ctx ? `${kfmt(used)} / ${ctxfmt(ctx)}` : "–";
+  const multiCtx = multiSlot;
+  $("ctx-single").hidden = multiCtx;
+  $("ctx-slots").hidden = !multiCtx;
+  if (multiCtx) {
+    renderCtxSlots(live, eng, mem);
+  } else {
+    let used = 0;
+    if (live.state !== "idle") used = (live.prompt_tokens || 0) + (live.generated || 0);
+    else if (last) used = (last.prompt_tokens || 0) + (last.output_tokens || 0);
+    const frac = ctx ? Math.min(1, used / ctx) : 0;
+    $("ctx-fill").setAttribute("stroke-dasharray", `${(235.6 * frac).toFixed(1)} 314.2`);
+    $("ctx-fill").style.opacity = 235.6 * frac >= 3 ? "1" : "0";         // a near-zero arc would draw just its round cap
+    $("ctx-pct").textContent = `${Math.round(frac * 100)}%`;
+    $("ctx-sub").textContent = ctx ? `${kfmt(used)} / ${ctxfmt(ctx)}` : "–";
+  }
+  // the memory bars: system RAM split by what holds it, and the card's memory split by type
   const cacheBytes = (eng.expert_cache_mib || 0) * 1048576;
-  $("slots-text").textContent = eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(cacheBytes)} GB` : "–";
-  $("slots-bar").style.width = hw.gpu_mem_total ? `${Math.min(100, (100 * cacheBytes) / hw.gpu_mem_total)}%` : "0%";
+  $("slots-text").textContent = eng.expert_cache_mib ? `${gb(cacheBytes)} GB` : "–";
   $("ram-text").textContent = hw.ram_total ? `${gb(hw.ram_used)} / ${gb(hw.ram_total, 0)} GB` : "–";
-  const ramPct = hw.ram_total ? (100 * hw.ram_used) / hw.ram_total : 0;
-  $("ram-bar").style.width = `${ramPct}%`;
-  if (ramPct > 92) $("ram-progress").dataset.tone = "danger"; else delete $("ram-progress").dataset.tone;
+  renderMemory(mem, eng);
   $("temp-text").textContent = hw.gpu_temp == null ? "–" : `${fmt(hw.gpu_temp)} °C`;
   $("temp-bar").style.width = hw.gpu_temp == null ? "0%" : `${Math.min(100, hw.gpu_temp)}%`;
 
