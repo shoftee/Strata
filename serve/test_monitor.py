@@ -285,13 +285,20 @@ class MemoryBreakdown(unittest.TestCase):
         svc.engine.info["unified"] = 0
         self.assertFalse(svc._memory({**self.HW, "gpu_mem_total": 512 * 2**20}, self.PARKED)["unified"])
 
-    def test_slots_report_their_tokens_without_a_kv_estimate(self):
+    def test_slots_report_their_tokens(self):
         svc = self.service()
         svc.engine.slots_view = lambda: [{"slot": 0, "state": "idle", "held_tokens": 1000},
                                          {"slot": 1, "state": "decoding", "prompt_tokens": 500, "generated": 20}]
         slots = svc._memory(self.HW, self.PARKED)["slots"]
-        self.assertEqual([(s["tokens"], s["kv_bytes"], s["kv_exact"]) for s in slots],
-                         [(1000, None, False), (520, None, False)])
+        self.assertEqual([(s["tokens"], s["kv_bytes"]) for s in slots], [(1000, None), (520, None)])
+
+    def test_slot_kv_is_exact_when_the_engine_gives_the_per_token_size(self):
+        svc = self.service()
+        svc.engine.info["kv_bytes_per_token"] = 12672
+        svc.engine.slots_view = lambda: [{"slot": 0, "state": "idle", "context_tokens": 1000},
+                                         {"slot": 1, "state": "decoding", "prompt_tokens": 500, "generated": 20}]
+        slots = svc._memory(self.HW, self.PARKED)["slots"]
+        self.assertEqual([(s["tokens"], s["kv_bytes"]) for s in slots], [(1000, 12672000), (520, 6589440)])
 
     def test_metrics_carries_memory(self):
         svc = self.service()

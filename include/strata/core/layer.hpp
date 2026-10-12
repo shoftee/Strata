@@ -277,6 +277,9 @@ struct QsaState {
 /// QSA layer. `with_rope = false` sizes a state that borrows it; `share_rope` points `st` at another state's table
 /// instead of building a copy (the session builds it once, in the first QSA layer).
 uint64_t qsa_state_bytes(const ModelGeometry& g, int64_t max_cells, bool with_rope = true, int64_t ring_cells = 0);
+/// Bytes of K/V one token occupies across the QSA layers for the KV format in effect (codes + scales, one cell per
+/// token exactly).  The Monitor multiplies it by a slot's token count for that context's measured KV footprint.
+uint64_t qsa_kv_bytes_per_token(const ModelGeometry& g);
 /// KV streaming: keep `cells` cells of each QSA layer in VRAM and the rest in pinned host memory (0: all in VRAM,
 /// the default). Set before sizing and initializing the session; a context that fits in `cells` is not streamed.
 /// Also puts the MTP drafter's K/V in a ring of its window (`ring_cells` of qsa_state_bytes/init; -1 forces a fully

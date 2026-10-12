@@ -305,9 +305,8 @@ function drawMemBar(barEl, legendEl, total, segs) {
     `<span class="mem-legend__label">${esc(s.label)}</span><span class="mem-legend__val">${esc(s.val || `${gb(s.bytes)} GB`)}</span></button>`).join("");
 }
 function slotKvTip(mem) {
-  const rows = (mem.slots || []).filter((s) => s.kv_bytes).map((s) => [`Slot ${s.slot}`, `${gb(s.kv_bytes, 2)} GB · ${fmt(s.tokens)} tok`]);
-  return tipHtml("Slot contexts (KV)", rows,
-    (mem.slots || []).some((s) => s.kv_bytes && !s.kv_exact) ? "Estimated from the conversation cache's bytes per token; the engine will report each slot exactly." : null);
+  const rows = (mem.slots || []).filter((s) => s.kv_bytes).map((s) => [`Slot ${s.slot}`, `${fmt(s.tokens)} tok · ${gb(s.kv_bytes, 2)} GB`]);
+  return tipHtml("Slot contexts (KV)", rows, null);
 }
 // the two stacked bars: system RAM split by what holds it, and the card's memory split by type
 function renderMemory(mem, eng) {
@@ -363,7 +362,7 @@ function renderCtxSlots(live, eng, mem) {
     const k = kv[s.slot];
     const tip = tipHtml(`Slot ${s.slot} · ${s.state}`,
       [["Context", ctx ? `${fmt(used)} / ${fmt(ctx)} tokens` : `${fmt(used)} tokens`],
-       k && k.kv_bytes ? ["KV footprint", `${gb(k.kv_bytes, 2)} GB${k.kv_exact ? "" : " (est.)"}`] : null,
+       k && k.kv_bytes ? ["KV footprint", `${gb(k.kv_bytes, 2)} GB`] : null,
        s.tok_s ? ["Speed", `${fmt(s.tok_s, 1)} tok/s`] : null]);
     return `<div class="ctx-slot" data-tip="${esc(tip)}" tabindex="0"><span class="ctx-slot__name">Slot ${s.slot}</span>` +
       `<div class="ctx-slot__bar"><div style="width:${(frac * 100).toFixed(1)}%;background:${color[s.state] || "var(--st-mem-system)"}"></div></div>` +

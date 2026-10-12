@@ -3369,8 +3369,8 @@ class Service:
 
     def _memory(self, hw: dict, parked: dict) -> dict:
         """GET /metrics' "memory": the Monitor's RAM / VRAM breakdown. Figures are measured (process RSS through
-        psutil) or reported by the engine (arena, expert cache, conversation cache). A slot's KV bytes are only shown
-        when the engine reports them (`kv_bytes`/`kv_exact`); there is no estimate, which was wildly off."""
+        psutil) or reported by the engine (arena, expert cache, conversation cache). A slot's KV bytes come from the
+        engine's per-token size (`kv_bytes`); the segment is left off when the engine reports no such figure."""
         eng = getattr(self.engine, "info", {}) or {}
         mib = lambda n: (n or 0) * 1048576
         arena, expert_cache, vram_free = mib(eng.get("arena_mib")), mib(eng.get("expert_cache_mib")), mib(eng.get("vram_free_mib"))
@@ -3386,12 +3386,13 @@ class Service:
 
         engine_rss = rss(getattr(getattr(self.engine, "proc", None), "pid", None))
         vision_rss = rss(getattr(getattr(self.vision, "proc", None), "pid", None)) if self.vision is not None else None
+        kv_bpt = eng.get("kv_bytes_per_token") or 0
         slots = []
         for s in (self.engine.slots_view() if hasattr(self.engine, "slots_view") else []):
             tokens = (s.get("context_tokens") or s.get("held_tokens") or 0) if s["state"] == "idle" \
                 else (s.get("prompt_tokens") or 0) + (s.get("generated") or 0)
             slots.append({"slot": s["slot"], "state": s["state"], "tokens": tokens,
-                          "kv_bytes": s.get("kv_bytes"), "kv_exact": bool(s.get("kv_exact"))})
+                          "kv_bytes": kv_bpt * tokens if kv_bpt else None})
         gpu_total = hw.get("gpu_mem_total")
         return {"ram_total": hw.get("ram_total"), "ram_used": hw.get("ram_used"),
                 "arena_bytes": arena or None, "expert_cache_bytes": expert_cache or None,

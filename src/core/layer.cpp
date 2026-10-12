@@ -686,6 +686,22 @@ uint64_t qsa_state_bytes(const ModelGeometry& g, int64_t max_cells, bool with_ro
     return align_up16(n) + 256;
 }
 
+// Bytes of K/V one token occupies, summed over the QSA layers, for the format in effect: the codes and their scales
+// (1,056 B/cell INT8, 576 Q4_0, 816 K8V4, 2,048 FP16).  One cell per token exactly, so the Monitor's per-slot KV
+// footprint (this times the slot's tokens) is exact.
+uint64_t qsa_kv_bytes_per_token(const ModelGeometry& g) {
+    const QsaShapes s = qsa_shapes(g);
+    if (g_kv_hybrid)   // K8V4: INT8 K (codes + scales) + Q4_0 V
+        return (uint64_t) g.n_qsa_layers() * ((uint64_t) s.n_head_kv * s.head_dim +
+                                              (uint64_t) s.n_head_kv * (s.head_dim / strata::kernels::KV_Q8_GROUP) * 2 +
+                                              (uint64_t) s.n_head_kv * strata::kernels::kv_q4_bytes_per_head((int) s.head_dim));
+    if (g_kv_q4)
+        return (uint64_t) g.n_qsa_layers() * strata::kernels::kv_q4_bytes_per_cell(s);
+    if (g_kv_int8)
+        return (uint64_t) g.n_qsa_layers() * strata::kernels::kv_q8_bytes_per_cell(s);
+    return (uint64_t) g.n_qsa_layers() * (uint64_t) s.n_head_kv * s.head_dim * 2 * 2;   // FP16 K + V
+}
+
 uint64_t qsa_state_init(const ModelGeometry& g, int64_t max_cells, void* base, QsaState& st,
                         const QsaState* share_rope, int64_t ring_cells) {
     const QsaShapes s = qsa_shapes(g);
