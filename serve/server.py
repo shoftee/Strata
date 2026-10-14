@@ -1041,7 +1041,7 @@ class StrataEngine:
             with self.wlock:
                 self.proc.stdin.write(text + "\n")
                 self.proc.stdin.flush()
-        except (OSError, AttributeError):                # the pipe is gone (or a restart's close() took the process):
+        except (OSError, AttributeError, ValueError):     # the pipe is gone (or a restart's close() took the process):
             raise EngineDied(f"the engine stopped unexpectedly (exit code {self.exit_code()})") from None
 
     def _control(self, cancel, on_token, stop_when=None, live=None):
@@ -1691,7 +1691,7 @@ class StrataEngine:
         try:
             self.proc.stdin.write(f"{head} {','.join(str(int(t)) for t in ids)}\n")
             self.proc.stdin.flush()
-        except OSError:                                  # the pipe is gone: the engine died (not the client)
+        except (OSError, ValueError):                    # the pipe is gone: the engine died (not the client)
             raise EngineDied(f"the engine stopped unexpectedly (exit code {self.exit_code()})") from None
         done = False
         # #481: how long the engine may stay silent from here.  Until the first line: the request's first prompt
@@ -1773,7 +1773,7 @@ class StrataEngine:
                     try:
                         self.proc.stdin.write("STOP\n")
                         self.proc.stdin.flush()
-                    except OSError:
+                    except (OSError, ValueError):
                         pass
                 # #481: never an untimed wait here - it holds the request FIFO, and an engine that lost step never
                 # answers.  An engine that honours STOP gets the current allowance in all (a STOP during a prompt
@@ -1865,7 +1865,7 @@ class StrataEngine:
         try:
             self.proc.stdin.write(f"{'SAVE' if action == 'save' else 'RESTORE'} {path}\n")
             self.proc.stdin.flush()
-        except OSError:
+        except (OSError, ValueError):
             raise EngineDied(f"the engine stopped unexpectedly (exit code {self.exit_code()})") from None
         silence = float(self.silence_s or 0)
         heard = time.monotonic()
@@ -1948,13 +1948,16 @@ class StrataEngine:
             raise out_of_step(line)
 
     def close(self):
-        """End the engine process: QUIT first (the engine frees its memory itself - unpinning tens of GB can take
-        a while), then terminate, then kill, each given 20 s.  Raises EngineStuck when it still runs after all three."""
+        """End the engine process: STOP and QUIT first (the engine frees its memory itself - unpinning tens of GB
+        can take a while), then terminate, then kill, each given 20 s.  Raises EngineStuck when it still runs
+        after all three."""
         if self.proc is None:
             return
         try:
             if self.proc.poll() is None:
                 try:
+                    if self.can_stop:
+                        self.proc.stdin.write("STOP\n")
                     self.proc.stdin.write("QUIT\n")
                     self.proc.stdin.flush()
                     self.proc.stdin.close()  # Windows' detached stdin reader must see EOF before shutdown
@@ -2333,6 +2336,11 @@ class Vision:
             try:
                 proc.wait(timeout=10)
             except (OSError, subprocess.TimeoutExpired):
+                pass
+        finally:
+            try:
+                proc.stdin.close()
+            except (OSError, ValueError):
                 pass
         self.stopped = True
 
@@ -6646,7 +6654,12 @@ def main() -> int:
             time.sleep(1)                               # Windows never delivers Ctrl+C to an untimed Event.wait()
     except KeyboardInterrupt:
         print("\n[strata] stopping (Ctrl+C again to end the engine at once) ...", flush=True)
-        closers = [httpd.shutdown, getattr(engine, "close", None), vision.shutdown if vision else None,
+        httpd.shutdown()
+        try:
+            httpd.socket.close()
+        except OSError:
+            pass
+        closers = [getattr(engine, "close", None), vision.shutdown if vision else None,
                    hub.close if hub is not None else None]
         for close in filter(None, closers):
             try:
@@ -6654,6 +6667,10 @@ def main() -> int:
             except KeyboardInterrupt:                   # a second Ctrl+C: don't wait for the engine to free its memory
                 if getattr(engine, "proc", None):
                     engine.proc.kill()
+        try:
+            httpd.server_close()
+        except (OSError, KeyboardInterrupt):
+            pass
         try:
             from serve import cache_drop
             cache_drop.drop_after_exit(engine)           # opt-in (STRATA_DROP_CACHE_ON_EXIT=1), default unchanged
