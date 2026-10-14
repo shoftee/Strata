@@ -325,6 +325,19 @@ class EngineNonFinite(ValueError):
     ends one that had started (as "length").  A ValueError, so a stream that has started reports it as an error event."""
 
 
+class EngineRefused(ValueError):
+    """The engine's ERR line, in the engine's own words. Those words describe its internals - a --batch slot, a CUDA
+    stage, an expert slot it was lending - and are not an API contract, so they are logged and the client is given
+    ENGINE_REFUSAL. A ValueError, so every site that already ends a started stream on a refusal keeps doing so."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+ENGINE_REFUSAL = "the model refused the request"
+
+
 class SessionRefused(ValueError):
     """Disk sessions: the engine refused or failed a SAVE / RESTORE and is still in step (`SERR <kind> <published>
     <reason>`).  `kind` is the engine's category - invalid (400), storage (507), memory (503), io (500); `published`:
@@ -952,7 +965,7 @@ class StrataEngine:
                 raise EngineDied("the engine ended")
             line = line.strip()
             if line.startswith("ERR"):
-                raise ValueError(line[4:].strip() or "the engine refused the VRAM command")
+                raise EngineRefused(line[4:].strip() or "the engine refused the VRAM command")
             if line.startswith("VRAM "):
                 out = {}
                 for kv in line.split()[1:]:
@@ -1102,7 +1115,7 @@ class StrataEngine:
                     self._yielded = (int(f[1]), int(f[2]))
             elif line.startswith("ERR"):
                 self._ctl_erred = True                   # #1059: the engine refused it and is idle: no DONE follows
-                raise ValueError(line[4:].strip())
+                raise EngineRefused(line[4:].strip())
             if line.startswith("DONE") and self._ctl_mode == "solo":
                 self._ctl_result = ("done", None)
                 return
@@ -1766,7 +1779,7 @@ class StrataEngine:
                     return
                 elif line.startswith("ERR"):
                     done = True
-                    raise ValueError(line[4:].strip())
+                    raise EngineRefused(line[4:].strip())
         finally:
             if not done:                                  # the consumer stopped early: stop the engine, drain to DONE
                 if self.can_stop:
@@ -5307,6 +5320,12 @@ def make_handler(svc: Service):
                 print(f"[strata] 503: {e}", flush=True)
                 self._json(503, responses_error_body(str(e), "server_error") if path == "/v1/responses"
                            else {"error": {"type": "server_error", "message": str(e)}})
+            except EngineRefused as e:
+                print(f"[strata] 500 engine refused: {e.reason}", flush=True)
+                if path == "/v1/responses":
+                    self._json(500, responses_error_body(ENGINE_REFUSAL, "server_error", code="server_error"))
+                else:
+                    self._json(500, {"error": {"type": "server_error", "message": ENGINE_REFUSAL}})
             except ValueError as e:
                 print(f"[strata] 400 invalid request: {e}", flush=True)
                 if path == "/v1/responses":
@@ -5612,6 +5631,11 @@ def make_handler(svc: Service):
                 err = {"error": {"type": "structured_output_failed", "code": "structured_output_failed", "message": str(e)}}
                 self._note(error=err["error"])
                 self.wfile.write(b"data: " + json.dumps(err).encode() + b"\n\ndata: [DONE]\n\n")
+            except EngineRefused as e:
+                print(f"[strata] engine refused: {e.reason}", flush=True)
+                err = {"error": {"type": "server_error", "message": ENGINE_REFUSAL}}
+                self._note(error=err["error"])
+                self.wfile.write(b"data: " + json.dumps(err).encode() + b"\n\ndata: [DONE]\n\n")
             except ValueError as e:                          # the engine's ERR after the stream started: the
                 err = {"error": {"type": "server_error", "message": str(e)}}   # headers are sent, so no 400 now
                 self._note(error=err["error"])
@@ -5678,6 +5702,9 @@ def make_handler(svc: Service):
                                                                 code="server_error"))
                 except EngineNonFinite as e:                 # #879, twice: not the request's fault
                     return self._json(503, responses_error_body(str(e), "server_error", code="server_error"))
+                except EngineRefused as e:
+                    print(f"[strata] engine refused: {e.reason}", flush=True)
+                    return self._json(500, responses_error_body(ENGINE_REFUSAL, "server_error", code="server_error"))
                 except ValueError as e:                      # the engine's ERR line
                     return self._json(500, responses_error_body(str(e), "server_error", code="server_error"))
                 return self._json(200, result)
@@ -5710,6 +5737,9 @@ def make_handler(svc: Service):
                 self._responses_failed(asm, f"{e}; the next request restarts it", "server_error", send)
             except StructuredOutputError as e:
                 self._responses_failed(asm, str(e), "structured_output_failed", send)
+            except EngineRefused as e:
+                print(f"[strata] engine refused: {e.reason}", flush=True)
+                self._responses_failed(asm, ENGINE_REFUSAL, "server_error", send)
             except ValueError as e:                          # the engine's ERR after the stream started
                 self._responses_failed(asm, str(e), "server_error", send)
 
@@ -5825,6 +5855,11 @@ def make_handler(svc: Service):
                 events.close()
             except EngineDied as e:                          # mid-stream: Anthropic's error event
                 err = {"type": "error", "error": {"type": "api_error", "message": f"{e}; the next request restarts it"}}
+                self._note(error=err["error"])
+                self.wfile.write(b"event: error\ndata: " + json.dumps(err).encode() + b"\n\n")
+            except EngineRefused as e:
+                print(f"[strata] engine refused: {e.reason}", flush=True)
+                err = {"type": "error", "error": {"type": "api_error", "message": ENGINE_REFUSAL}}
                 self._note(error=err["error"])
                 self.wfile.write(b"event: error\ndata: " + json.dumps(err).encode() + b"\n\n")
             except ValueError as e:                          # the engine's ERR after the stream started
