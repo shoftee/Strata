@@ -262,6 +262,46 @@ def free_vram_mib(index=0, amd=False):
     return int((r["mem_total"] - r["mem_used"]) >> 20)
 
 
+def drm_memory_bytes(pid) -> dict:
+    """One process's GPU memory by allocator, from its DRM clients' fdinfo (Linux): {"vram": B, "gtt": B, "cpu": B,
+    "total": B}. vram is dedicated card memory, gtt system RAM the GPU is using, cpu host RAM mapped for it - the same
+    split on either kind of card. {} when the kernel does not report it or the process is gone, never a zero, which
+    would read as "holds nothing"."""
+    if pid is None or not sys.platform.startswith("linux"):
+        return {}
+    out, seen = {}, set()
+    try:
+        names = os.listdir(f"/proc/{pid}/fdinfo")
+    except OSError:
+        return {}
+    for name in names:
+        try:
+            with open(f"/proc/{pid}/fdinfo/{name}", encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        if "drm-driver:" not in text:              # not a DRM client (and no parse of the thousands that are not)
+            continue
+        client, mem = None, {}
+        for line in text.splitlines():
+            key, _, rest = line.partition(":")
+            if key == "drm-client-id":
+                client = rest.strip()
+            elif key.startswith("drm-memory-"):
+                parts = rest.split()
+                if parts and parts[0].isdigit():
+                    mem[key[len("drm-memory-"):]] = mem.get(key[len("drm-memory-"):], 0) + int(parts[0]) * 1024
+        if client is None or client in seen:       # one client is counted once however many fds carry it
+            continue
+        seen.add(client)
+        for k, v in mem.items():
+            out[k] = out.get(k, 0) + v
+    if not out:
+        return {}
+    out["total"] = sum(out.values())
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ CPU / RAM
 def _cpu_name():
     if os.name == "nt":

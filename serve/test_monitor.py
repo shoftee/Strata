@@ -1,5 +1,6 @@
 """Request inspection through HTTP; no native model or GPU is required."""
 import json
+import tempfile
 import threading
 import time
 import unittest
@@ -7,6 +8,7 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from serve.frontend import ChatTemplate
@@ -312,6 +314,97 @@ class MemoryBreakdown(unittest.TestCase):
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+    def test_the_sparkline_follows_the_same_figure_as_the_tile(self):
+        """The tile reads the measured figure, so its sparkline has to be the history of that same figure: the
+        sampler's own gpu_mem_used series is the driver's whole-card reading, which is a different memory on a card
+        that shares memory with the CPU."""
+        from serve import telemetry
+        svc = self.service()
+        svc.engine.proc = SimpleNamespace(pid=4242)
+        with mock.patch.object(telemetry, "drm_memory_bytes",
+                               lambda pid: {"gtt": 40 << 30, "total": 40 << 30} if pid == 4242 else {}):
+            first = svc._memory(self.HW, self.PARKED)["gpu_mem_used"]
+            hist = svc._memory(self.HW, self.PARKED)["gpu_used_hist"]
+        self.assertEqual(first, 40 << 30)
+        self.assertEqual(hist, [first, first])
+        web = Path(__file__).parent / "web"
+        js = (web / "app.js").read_text(encoding="utf-8")
+        self.assertIn('spark("sp-vram", mem && mem.gpu_used_hist', js)
+
+    def test_the_vram_bar_uses_the_system_ram_colours_for_the_encoder_and_the_rest(self):
+        """The VRAM bar's two measured parts keep the colours the System RAM bar uses for the same things: the encoder
+        red (it is a row of "Strata (other)" there), the remainder grey (as "System & other apps")."""
+        web = Path(__file__).parent / "web"
+        js = (web / "app.js").read_text(encoding="utf-8")
+        self.assertIn('visiongpu: "engine"', js)
+        self.assertIn('othergpu: "system"', js)
+        self.assertIn('kind: "visiongpu", label: "Vision encoder"', js)
+        self.assertIn('kind: "othergpu", label: "Other"', js)
+
+    def test_the_vram_label_reads_the_total_not_the_expert_cache(self):
+        """The bar is drawn against everything Strata holds on the card, so the figure beside its title says the same:
+        it used to show eng.expert_cache_mib, which is one segment of it, next to a bar drawn to a different total."""
+        js = (Path(__file__).parent / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('mem && mem.gpu_mem_used != null ? `${gb(mem.gpu_mem_used)} GB`', js)
+
+    def test_the_vram_total_is_what_strata_holds_not_the_startup_pool(self):
+        """The bar's total used to be max(gpu_mem_total, expert_cache + vram_free_bytes): the driver's dedicated VRAM
+        (a 512 MiB carve-out on a card sharing memory with the CPU) or, failing that, the pool the engine sized its
+        cache against at startup - a figure frozen at that moment. It is now the sum of what the engine and the image
+        encoder hold on the card, measured per process, so it follows the allocations."""
+        from serve import telemetry
+        svc = self.service()
+        with mock.patch.object(telemetry, "drm_memory_bytes", lambda pid: {} if pid != 4242 else {"vram": 8 << 30, "gtt": 32 << 30, "total": 40 << 30}):
+            svc.engine.proc = SimpleNamespace(pid=4242)
+            m = svc._memory(self.HW, self.PARKED)
+        self.assertEqual(m["gpu_mem_used"], 40 << 30)          # not 20 << 30 (the driver), not 53 GiB (the pool)
+        self.assertEqual(m["gpu_mem_used_hw"], 20 << 30)      # the driver's own reading, kept beside it
+        self.assertEqual(m["gpu_bytes"]["engine"], {"vram": 8 << 30, "gtt": 32 << 30, "total": 40 << 30})
+        self.assertIsNone(m["gpu_bytes"]["vision"])
+
+    def test_both_processes_are_counted_apart(self):
+        from serve import telemetry
+        svc = self.service()
+        one, two = 4242, 4343
+        svc.engine.proc = SimpleNamespace(pid=one)
+        svc.vision = SimpleNamespace(proc=SimpleNamespace(pid=two))
+        with mock.patch.object(telemetry, "drm_memory_bytes",
+                               lambda pid: {one: {"gtt": 39 << 30, "total": 39 << 30},
+                                            two: {"gtt": 1460 << 20, "total": 1460 << 20}}.get(pid, {})):
+            m = svc._memory(self.HW, self.PARKED)
+        self.assertEqual(m["gpu_mem_used"], (39 << 30) + (1460 << 20))
+        self.assertEqual(m["gpu_bytes"]["vision"]["gtt"], 1460 << 20)
+
+    def test_the_reader_splits_the_kernel_figures_and_counts_a_client_once(self):
+        """drm-memory-vram is dedicated VRAM, -gtt system RAM the GPU is using, -cpu host RAM mapped for it: one split
+        for both kinds of card. A DRM client reachable through several fds is counted once, and a process with no DRM
+        fd at all gives {} - never a zero, which would read as "holds nothing"."""
+        from serve import telemetry
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "4242" / "fdinfo"
+            root.mkdir(parents=True)
+            one = "drm-driver:\tamdgpu\ndrm-client-id:\t16\ndrm-memory-vram:\t36312 KiB\ndrm-memory-gtt:\t40982532 KiB\n"
+            (root / "7").write_text(one)
+            (root / "9").write_text(one)                       # the same client under a second fd
+            (root / "3").write_text("pos:\t0\nflags:\t02000002\n")   # not a DRM client
+            with mock.patch.object(telemetry.os, "listdir", lambda p: ["3", "7", "9"]), \
+                 mock.patch("builtins.open", side_effect=lambda p, **k: (root / Path(p).name).open() if "fdinfo" in p
+                            else open(p, **k)):
+                got = telemetry.drm_memory_bytes(4242)
+        self.assertEqual(got["vram"], 36312 * 1024)
+        self.assertEqual(got["gtt"], 40982532 * 1024)
+        self.assertEqual(got["total"], (36312 + 40982532) * 1024)
+        self.assertEqual(telemetry.drm_memory_bytes(None), {})
+        self.assertEqual(telemetry.drm_memory_bytes(999999), {})      # no such process
+
+    def test_no_kernel_reporting_leaves_the_tile_empty_rather_than_zero(self):
+        from serve import telemetry
+        svc = self.service()
+        svc.engine.proc = SimpleNamespace(pid=4242)
+        with mock.patch.object(telemetry, "drm_memory_bytes", lambda pid: {}):
+            m = svc._memory(self.HW, self.PARKED)
+        self.assertIsNone(m["gpu_mem_used"])                   # a dash, not a false "nothing on the card"
 
     def test_the_bars_are_on_the_page(self):
         web = Path(__file__).parent / "web"

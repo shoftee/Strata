@@ -265,7 +265,9 @@ function renderTotals(t) {
 // ------------------------------------------------------------------ Monitor: memory breakdown + per-slot views
 // one hue per memory type (the --st-mem-* colours in app.css); a segment's kind picks its colour and tooltip
 const MEM_COLOR = {experts: "experts", gpu: "gpu", engine: "engine", conv: "conv", vision: "vision",
-                   server: "server", system: "system", expertcache: "experts", slots: "gpu"};
+                   server: "server", system: "system", expertcache: "experts", slots: "gpu",
+                   // red and grey, as the System RAM bar uses for the same two things
+                   visiongpu: "engine", othergpu: "system"};
 const memColor = (kind) => `var(--st-mem-${MEM_COLOR[kind] || "system"})`;
 const bytesStr = (b) => (b == null ? "–" : `${gb(b, 2)} GB`);
 // a tooltip's inner HTML: a bold head, label/value rows, an optional note (values are already display strings)
@@ -347,12 +349,21 @@ function renderMemory(mem, eng) {
     tip: tipHtml("System & other apps", [["RAM in use", bytesStr(mem.ram_used)], ["Strata's parts", bytesStr(accounted)]], "The operating system, drivers and other programs: what is left of RAM in use once Strata's parts are subtracted.")});
   drawMemBar($("ram-bar"), $("ram-legend"), mem.ram_total || 0, segs);
 
-  const vramTotal = Math.max(mem.gpu_mem_total || 0, expertCache + (mem.vram_free_bytes || 0));
+  // Measured per process, so it moves with allocations.
+  const gpuParts = (mem.gpu_bytes || {});
+  const vramTotal = mem.gpu_mem_used || 0;
   const vsegs = [];
   if (expertCache) vsegs.push({kind: "expertcache", label: "Expert cache", bytes: expertCache,
     val: eng && eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(expertCache)} GB` : null,
     tip: tipHtml("Expert cache in VRAM", [["Resident", bytesStr(expertCache)]], "The experts kept on the card for fast lookup.")});
   if (kvTotal) vsegs.push({kind: "slots", label: "Slot contexts (KV)", bytes: kvTotal, tip: slotKvTip(mem)});
+  const named = vsegs.reduce((a, s) => a + s.bytes, 0);
+  const gpuRest = vramTotal - named - (gpuParts.vision ? gpuParts.vision.total : 0);
+  if (gpuParts.vision && gpuParts.vision.total)
+    vsegs.push({kind: "visiongpu", label: "Vision encoder", bytes: gpuParts.vision.total,
+      tip: tipHtml("Image encoder on the graphics card", [["On the card", bytesStr(gpuParts.vision.total)]])});
+  if (gpuRest > 0) vsegs.push({kind: "othergpu", label: "Other", bytes: gpuRest,
+    tip: tipHtml("Other GPU memory", [["On the card", bytesStr(gpuRest)]])});
   drawMemBar($("vram-bar"), $("vram-legend"), vramTotal, vsegs);
 }
 // the running slots' context fill, one row each (the single gauge is for one context)
@@ -447,10 +458,13 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, mem, 
   setMetric("gpu", hw.gpu_util == null ? null : fmt(hw.gpu_util), "%",
             multi ? per((g) => (g.util == null ? "–" : `${fmt(g.util)}%`)) : st.gpu_name || (st.gpu_note ? "not available" : ""));
   spark("sp-gpu", h.gpu_util, 100);
-  setMetric("vram", hw.gpu_mem_used == null ? null : gb(hw.gpu_mem_used), hw.gpu_mem_total ? `/ ${gb(hw.gpu_mem_total, 0)} GB` : "GB",
+  // no "/ total": gpu_mem_total is the card's own memory, not a ceiling for what Strata may hold on it
+  const vramUsed = mem ? mem.gpu_mem_used : null;
+  // no expert count here: it labels the bar's own expert cache segment
+  setMetric("vram", vramUsed == null ? null : gb(vramUsed), "GB",
             multi ? per((g) => (g.mem_used == null ? "–" : `${gb(g.mem_used)} GB`))
-                  : eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached` : (st.gpu_note ? "not available on Windows AMD yet" : ""));
-  spark("sp-vram", h.gpu_mem_used, hw.gpu_mem_total);
+                  : st.gpu_note ? st.gpu_note : "");
+  spark("sp-vram", mem && mem.gpu_used_hist, vramUsed ? Math.max(vramUsed, 1) : null);
   setMetric("temp", hw.gpu_temp == null ? null : fmt(hw.gpu_temp), "°C",
             multi ? per((g) => (g.temp == null ? "–" : `${fmt(g.temp)}°`)) : "");
   spark("sp-temp", h.gpu_temp, 90);
@@ -491,8 +505,9 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, mem, 
     $("ctx-sub").textContent = ctx ? `${kfmt(used)} / ${ctxfmt(ctx)}` : "–";
   }
   // the memory bars: system RAM split by what holds it, and the card's memory split by type
-  const cacheBytes = (eng.expert_cache_mib || 0) * 1048576;
-  $("slots-text").textContent = eng.expert_cache_mib ? `${gb(cacheBytes)} GB` : "–";
+  // the total the bar is drawn against
+  $("slots-text").textContent = mem && mem.gpu_mem_used != null ? `${gb(mem.gpu_mem_used)} GB`
+                          : eng.expert_cache_mib ? `${gb((eng.expert_cache_mib || 0) * 1048576)} GB` : "–";
   $("ram-text").textContent = hw.ram_total ? `${gb(hw.ram_used)} / ${gb(hw.ram_total, 0)} GB` : "–";
   renderMemory(mem, eng);
   $("temp-text").textContent = hw.gpu_temp == null ? "–" : `${fmt(hw.gpu_temp)} °C`;

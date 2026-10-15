@@ -2940,6 +2940,8 @@ class Service:
         # turn before the answer instead of the top of the prompt, so switching it keeps the cached conversation
         self.effort_end = False
         self.conv_log = ConvCacheLog()                  # #596: the parked conversations, from the engine's log
+        self.gpu_hist: collections.deque = collections.deque(maxlen=60)   # the VRAM tile's sparkline
+        self.gpu_lock = threading.Lock()
         self.config_path = None                         # #564: the run config the web page's Settings view edits
         self.config_lock = threading.Lock()
         # #321: browser pages of these origins may call /v1/* (CORS; "*" = any page - only with an api_key that
@@ -3400,6 +3402,10 @@ class Service:
                     | {"wallclock_s": r.get("wallclock_s", round(time.perf_counter() - r["_clock"], 3))}
                     for r in reversed(records)]
 
+    def _gpu_history(self) -> list:
+        with self.gpu_lock:
+            return list(self.gpu_hist)
+
     def _memory(self, hw: dict, parked: dict) -> dict:
         """GET /metrics' "memory": the Monitor's RAM / VRAM breakdown. Figures are measured (process RSS through
         psutil) or reported by the engine (arena, expert cache, conversation cache). A slot's KV bytes come from the
@@ -3418,7 +3424,13 @@ class Service:
                 return None
 
         engine_rss = rss(getattr(getattr(self.engine, "proc", None), "pid", None))
-        vision_rss = rss(getattr(getattr(self.vision, "proc", None), "pid", None)) if self.vision is not None else None
+        vision_pid = getattr(getattr(self.vision, "proc", None), "pid", None) if self.vision is not None else None
+        vision_rss = rss(vision_pid)
+        # per process, so the engine and the encoder are counted apart; the bar's total is their sum
+        from serve.telemetry import drm_memory_bytes
+        with self.gpu_lock:
+            engine_gpu = drm_memory_bytes(getattr(getattr(self.engine, "proc", None), "pid", None))
+            vision_gpu = drm_memory_bytes(vision_pid)
         kv_bpt = eng.get("kv_bytes_per_token") or 0
         slots = []
         for s in (self.engine.slots_view() if hasattr(self.engine, "slots_view") else []):
@@ -3427,9 +3439,18 @@ class Service:
             slots.append({"slot": s["slot"], "state": s["state"], "tokens": tokens,
                           "kv_bytes": kv_bpt * tokens if kv_bpt else None})
         gpu_total = hw.get("gpu_mem_total")
+        gpu_used = sum(p.get("total", 0) for p in (engine_gpu, vision_gpu)) or None
+        # a minute of the same figure for the tile's sparkline
+        if gpu_used is not None:
+            with self.gpu_lock:
+                self.gpu_hist.append(gpu_used)
         return {"ram_total": hw.get("ram_total"), "ram_used": hw.get("ram_used"),
                 "arena_bytes": arena or None, "expert_cache_bytes": expert_cache or None,
-                "vram_free_bytes": vram_free or None, "gpu_mem_total": gpu_total, "gpu_mem_used": hw.get("gpu_mem_used"),
+                "vram_free_bytes": vram_free or None, "gpu_mem_total": gpu_total,
+                # gpu_mem_used_hw: the driver's whole-card reading, which is all a discrete card has
+                "gpu_mem_used": gpu_used, "gpu_mem_used_hw": hw.get("gpu_mem_used"),
+                "gpu_used_hist": self._gpu_history(),
+                "gpu_bytes": {"engine": engine_gpu or None, "vision": vision_gpu or None},
                 "unified": bool(eng.get("unified")),
                 "conv_bytes": int(parked.get("bytes") or 0) or None, "conv_parked": parked.get("parked"),
                 "conv_budget_bytes": mib(eng.get("conversation_cache_mib")) or None,
