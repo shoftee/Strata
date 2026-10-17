@@ -315,17 +315,27 @@ function slotKvTip(mem) {
   const rows = (mem.slots || []).filter((s) => s.kv_bytes).map((s) => [`Slot ${s.slot}`, `${fmt(s.tokens)} tok · ${gb(s.kv_bytes, 2)} GB`]);
   return tipHtml("Slot contexts (KV)", rows, null);
 }
-// the running slots' device carveouts, one row each: the tokens the slot holds and its KV state against the
-// full-context copy it pins in RAM
+// the batch slots' device sessions, one row per slot: the tokens it holds and the carve the engine made for it
 function slotCarveTip(mem, carvePer) {
-  const rows = (mem.slots || []).map((s) =>
+  const slots = (mem.slots || []);
+  const rows = slots.length ? slots.map((s) =>
+    [`Slot ${s.slot} · ${s.state === "idle" ? "idle" : `${fmt(s.tokens)} tok`}`, bytesStr(carvePer || 0)])
+    : [["Carved at load", bytesStr(mem.slot_carve_bytes || 0)]];
+  return tipHtml("Batch slots (device)", rows,
+    "Carved at load: each session holds the KV window the card streams from plus its indexer and recurrence " +
+    "state (and its drafter with --batch-mtp). Its whole-context K/V copy is pinned in RAM: the System RAM " +
+    "bar's \"Batch slot reserve\".");
+}
+// the batch slots' pinned full-context K/V copies, one row per slot: what it holds now against the copy it owns
+function reserveTip(mem, kvSession) {
+  const slots = (mem.slots || []);
+  const rows = slots.length ? slots.map((s) =>
     [`Slot ${s.slot} · ${s.state === "idle" ? "idle" : `${fmt(s.tokens)} tok`}`,
-     mem.kv_session_bytes ? `${gb(s.kv_bytes || 0, 2)} / ${gb(mem.kv_session_bytes, 2)} GB` : null]);
-  if (carvePer) rows.push(["Device carveout", `${bytesStr(carvePer)} per slot`]);
-  return tipHtml("Batch slots on the card", rows,
-    "Bar: each slot's session carve-out on the card (its KV residency window, indexer and recurrence state). " +
-    "Current / total: the KV state it holds against its full-context copy, which is pinned in RAM (the System " +
-    "RAM bar's Batch slot reserve) when KV streaming is on.");
+     kvSession ? `${gb(kvSession, 2)} pinned · ${gb(s.kv_bytes || 0, 2)} held` : null])
+    : (kvSession ? [["Per slot", bytesStr(kvSession)]] : null);
+  return tipHtml("Batch slot reserve", rows,
+    "Each slot's full-context K/V copy, pinned in RAM from load (KV streaming). It never shrinks or moves with " +
+    "the tokens and is freed only when the model unloads.");
 }
 // the two stacked bars: system RAM split by what holds it, and the card's memory split by type
 function renderMemory(mem, eng) {
@@ -345,20 +355,14 @@ function renderMemory(mem, eng) {
     tip: tipHtml("Model experts in RAM", [["Resident", bytesStr(arena)]], "The expert weights the engine keeps in system RAM (its arena).")});
   if (mem.unified && gpuMem) {
     const grows = [["Expert cache", bytesStr(expertCache)]];
-    if (kvStream && carve) grows.push(["Slot carveouts", bytesStr(carve)]);
+    if (kvStream && carve) grows.push(["Batch slots (device)", bytesStr(carve)]);
     else if (kvTotal) grows.push(["Slot contexts (KV)", bytesStr(kvTotal)]);
     segs.push({kind: "gpu", label: "On the graphics card", bytes: gpuMem,
       tip: tipHtml("Model memory on the graphics card", grows, "This machine shares one pool of RAM, so the card's memory counts as System RAM.")});
   }
   if (conv) segs.push({kind: "conv", label: "Conversation cache", bytes: conv,
     tip: tipHtml("Conversation cache", [["Parked now", bytesStr(conv)], ["Conversations", fmt(mem.conv_parked)], ["Budget", bytesStr(mem.conv_budget_bytes)]], "Whole conversations parked in RAM so a follow-up reuses them.")});
-  if (kvReserve) {
-    const n = (eng && eng.batch_slots) || (kvSession ? Math.round(kvReserve / kvSession) : 0);
-    segs.push({kind: "slotres", label: "Batch slot reserve", bytes: kvReserve,
-      tip: tipHtml("Batch slot reserve",
-        kvSession ? [["Per slot", bytesStr(kvSession)], ["Slots", fmt(n)]] : null,
-        "Every batch slot keeps a full-context K/V copy pinned in RAM from load (KV streaming). It never shrinks or moves with the tokens and is freed only when the model unloads.")});
-  }
+  if (kvReserve) segs.push({kind: "slotres", label: "Batch slot reserve", bytes: kvReserve, tip: reserveTip(mem, kvSession)});
   const strataOther = engineRuntime + vision + server;
   if (strataOther) {
     const rows = [];
@@ -382,7 +386,7 @@ function renderMemory(mem, eng) {
     val: eng && eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(expertCache)} GB` : null,
     tip: tipHtml("Expert cache in VRAM", [["Resident", bytesStr(expertCache)]], "The experts kept on the card for fast lookup.")});
   if (!kvStream && kvTotal) vsegs.push({kind: "slots", label: "Slot contexts (KV)", bytes: kvTotal, tip: slotKvTip(mem)});
-  if (carve) vsegs.push({kind: "slotres", label: "Batch slots", bytes: carve, tip: slotCarveTip(mem, carvePer)});
+  if (carve) vsegs.push({kind: "slotres", label: "Batch slots (device)", bytes: carve, tip: slotCarveTip(mem, carvePer)});
   const named = vsegs.reduce((a, s) => a + s.bytes, 0);
   const gpuRest = vramTotal - named - (gpuParts.vision ? gpuParts.vision.total : 0);
   if (gpuParts.vision && gpuParts.vision.total)

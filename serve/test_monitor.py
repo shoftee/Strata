@@ -376,11 +376,12 @@ class MemoryBreakdown(unittest.TestCase):
         carveouts instead; without streaming the used-KV segment stays as before."""
         web = Path(__file__).parent / "web"
         js = (web / "app.js").read_text(encoding="utf-8")
-        self.assertIn('label: "Batch slots"', js)
+        self.assertIn('label: "Batch slots (device)"', js)
         self.assertIn("function slotCarveTip", js)
+        self.assertIn("function reserveTip", js)
         self.assertIn("kvStream ? carve : kvTotal", js)
         self.assertIn('if (!kvStream && kvTotal) vsegs.push({kind: "slots"', js)
-        self.assertIn('if (kvStream && carve) grows.push(["Slot carveouts"', js)
+        self.assertIn('if (kvStream && carve) grows.push(["Batch slots (device)"', js)
 
     def test_metrics_carries_memory(self):
         svc = self.service()
