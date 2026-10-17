@@ -378,6 +378,8 @@ class MemoryBreakdown(unittest.TestCase):
         js = (web / "app.js").read_text(encoding="utf-8")
         self.assertIn('label: "Batch slots (device)"', js)
         self.assertIn("function slotCarveTip", js)
+        self.assertIn('rows.push(["Device carveout"', js)
+        self.assertIn('rows.push(["Slots", fmt(n)]', js)
         self.assertIn("function reserveTip", js)
         self.assertIn("kvStream ? carve : kvTotal", js)
         self.assertIn('if (!kvStream && kvTotal) vsegs.push({kind: "slots"', js)

@@ -315,16 +315,20 @@ function slotKvTip(mem) {
   const rows = (mem.slots || []).filter((s) => s.kv_bytes).map((s) => [`Slot ${s.slot}`, `${fmt(s.tokens)} tok · ${gb(s.kv_bytes, 2)} GB`]);
   return tipHtml("Slot contexts (KV)", rows, null);
 }
-// the batch slots' device sessions, one row per slot: the tokens it holds and the carve the engine made for it
+// the batch slots' device sessions: one row per slot with the tokens it holds, plus what the engine carved for
+// each and how many slots there are; the KV tokens themselves live in the pinned copies (the reserve's tooltip)
 function slotCarveTip(mem, carvePer) {
   const slots = (mem.slots || []);
-  const rows = slots.length ? slots.map((s) =>
-    [`Slot ${s.slot} · ${s.state === "idle" ? "idle" : `${fmt(s.tokens)} tok`}`, bytesStr(carvePer || 0)])
-    : [["Carved at load", bytesStr(mem.slot_carve_bytes || 0)]];
+  const n = slots.length || (carvePer && Math.round((mem.slot_carve_bytes || 0) / carvePer));
+  const rows = slots.map((s) =>
+    [`Slot ${s.slot} · ${s.state === "idle" ? "idle" : `${fmt(s.tokens)} tok`}`, null]);
+  if (!slots.length && mem.slot_carve_bytes) rows.push(["At load", bytesStr(mem.slot_carve_bytes)]);
+  if (carvePer) rows.push(["Device carveout", `${bytesStr(carvePer)} per slot`]);
+  if (n) rows.push(["Slots", fmt(n)]);
   return tipHtml("Batch slots (device)", rows,
-    "Carved at load: each session holds the KV window the card streams from plus its indexer and recurrence " +
-    "state (and its drafter with --batch-mtp). Its whole-context K/V copy is pinned in RAM: the System RAM " +
-    "bar's \"Batch slot reserve\".");
+    "Carved at load from the card: each slot's session holds its KV residency window, its indexer and " +
+    "recurrence state, and (with --batch-mtp) its drafter's state. The KV tokens live in the slot's full-context " +
+    "copy pinned in RAM: the System RAM bar's \"Batch slot reserve\".");
 }
 // the batch slots' pinned full-context K/V copies, one row per slot: what it holds now against the copy it owns
 function reserveTip(mem, kvSession) {
@@ -334,8 +338,8 @@ function reserveTip(mem, kvSession) {
      kvSession ? `${gb(kvSession, 2)} pinned · ${gb(s.kv_bytes || 0, 2)} held` : null])
     : (kvSession ? [["Per slot", bytesStr(kvSession)]] : null);
   return tipHtml("Batch slot reserve", rows,
-    "Each slot's full-context K/V copy, pinned in RAM from load (KV streaming). It never shrinks or moves with " +
-    "the tokens and is freed only when the model unloads.");
+    "Each slot's full-context K/V copy - where its KV tokens live - pinned in RAM from load (KV streaming). It " +
+    "never shrinks or moves with the tokens and is freed only when the model unloads.");
 }
 // the two stacked bars: system RAM split by what holds it, and the card's memory split by type
 function renderMemory(mem, eng) {
