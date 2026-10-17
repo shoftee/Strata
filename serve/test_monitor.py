@@ -323,12 +323,64 @@ class MemoryBreakdown(unittest.TestCase):
         m = svc._memory(self.HW, self.PARKED)
         self.assertIsNone(m["kv_slot_reserve_bytes"])
 
+    def test_the_slots_device_carveouts_come_from_the_engine_log(self):
+        from serve.server import SlotCarveLog
+        import tempfile
+        SESSION = "strata generate: --batch: 2 slot sessions on CUDA0 (0.95 GiB each); 101.77 GiB free\n"
+        DRAFTER = "strata generate: --batch-mtp: 2 slot drafters on CUDA0 (15 MiB of private K/V state and buffers each, sharing the solo drafter's weights); 100.95 GiB free there\n"
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "strata.log"
+            log.write_text("an earlier run with --batch: 4 slot sessions on CUDA0 (0.50 GiB each);\n", encoding="utf-8")
+            start = log.stat().st_size                 # this run starts here: the earlier run's carves are not counted
+            c = SlotCarveLog()
+            self.assertIsNone(c.poll(str(log), start)["sessions"] or None)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(SESSION)
+            st = c.poll(str(log), start)
+            self.assertEqual(st["sessions"], 2)
+            self.assertEqual(st["per_slot_bytes"], round(0.95 * (1 << 30)))
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(DRAFTER)
+            st = c.poll(str(log), start)
+            self.assertEqual(st["drafter_bytes"], 15 * 1048576)
+            self.assertIsNone(SlotCarveLog().poll(None, None)["sessions"] or None)   # no log seen: nothing to show
+
+    def test_memory_carries_the_slot_carveouts(self):
+        from serve.server import SlotCarveLog
+        import tempfile
+        svc = self.service()
+        svc.engine.info = {"kv_bytes_per_token": 12672, "context": 262144, "batch_slots": 2, "kv_resident": 32768}
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "strata.log"
+            log.write_text("strata generate: --batch: 2 slot sessions on CUDA0 (0.95 GiB each); 101.77 GiB free\n"
+                           "strata generate: --batch-mtp: 2 slot drafters on CUDA0 (15 MiB of private K/V state and "
+                           "buffers each, sharing the solo drafter's weights); 100.95 GiB free there\n", encoding="utf-8")
+            svc.engine.log_path = str(log)
+            svc.engine.log_start = 0
+            m = svc._memory(self.HW, self.PARKED)
+        self.assertEqual(m["slot_carve_per_slot"], round(0.95 * (1 << 30)) + 15 * 1048576)
+        self.assertEqual(m["slot_carve_bytes"], m["slot_carve_per_slot"] * 2)
+        fresh = self.service()                       # a service that never saw the engine print its carves
+        fresh.engine.info = svc.engine.info
+        self.assertIsNone(fresh._memory(self.HW, self.PARKED)["slot_carve_bytes"])
+
     def test_the_ram_bar_shows_the_slot_reserve_as_its_own_segment(self):
         web = Path(__file__).parent / "web"
         js = (web / "app.js").read_text(encoding="utf-8")
         self.assertIn('kind: "slotres", label: "Batch slot reserve"', js)
         self.assertIn("engineRss - arena - conv - kvReserve", js)
         self.assertIn('slotres: "slotres"', js)
+
+    def test_the_vram_bar_shows_the_carveouts_and_drops_the_spilled_kv(self):
+        """With KV streaming the K/V's authoritative copy is pinned in RAM, so the card's bar names the slots' device
+        carveouts instead; without streaming the used-KV segment stays as before."""
+        web = Path(__file__).parent / "web"
+        js = (web / "app.js").read_text(encoding="utf-8")
+        self.assertIn('label: "Batch slots"', js)
+        self.assertIn("function slotCarveTip", js)
+        self.assertIn("kvStream ? carve : kvTotal", js)
+        self.assertIn('if (!kvStream && kvTotal) vsegs.push({kind: "slots"', js)
+        self.assertIn('if (kvStream && carve) grows.push(["Slot carveouts"', js)
 
     def test_metrics_carries_memory(self):
         svc = self.service()

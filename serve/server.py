@@ -576,6 +576,54 @@ class ConvCacheLog:
         return dict(self.state)
 
 
+class SlotCarveLog:
+    """The Monitor's batch-slot device carveouts, as the engine's log says them: every stage that carves batch slots
+    prints "--batch: N slot sessions on CUDAk (X.XX GiB each)" once at load, and with --batch-mtp each slot also has
+    a drafter ("--batch-mtp: N slot drafters on CUDAk (Y MiB of private K/V state and buffers each)"). Read on from
+    where it was last read, from the start of the engine's current run (ConvCacheLog's mechanics)."""
+    SESSION = re.compile(r"--batch: (\d+) slot sessions on CUDA(\d+) \(([0-9.]+) GiB each\);")
+    DRAFTER = re.compile(r"--batch-mtp: (\d+) slot drafters on CUDA(\d+) \((\d+) MiB of private K/V state")
+    READ_MAX = 1 << 22                                  # at most the last 4 MiB of new lines per read
+
+    def __init__(self):
+        self.key, self.pos = None, 0
+        self.reset()
+
+    def reset(self):
+        self.state = {"sessions": 0, "per_slot_bytes": 0, "drafter_bytes": 0}
+
+    def poll(self, path, start) -> dict:
+        if not path or start is None:
+            return dict(self.state)
+        if self.key != (path, start):                   # another start of the engine: the carves are fresh
+            self.key, self.pos = (path, start), start
+            self.reset()
+        try:
+            size = os.path.getsize(path)
+            if size < self.pos:
+                self.pos = 0
+            if size - self.pos > self.READ_MAX:
+                self.pos = size - self.READ_MAX
+            with open(path, "rb") as f:
+                f.seek(self.pos)
+                data = f.read(size - self.pos)
+        except OSError:
+            return dict(self.state)
+        end = data.rfind(b"\n") + 1                     # whole lines only: the rest is read next time
+        self.pos += end
+        for line in data[:end].decode("utf-8", "replace").splitlines():
+            m = self.SESSION.search(line)
+            if m:
+                self.state["sessions"] = int(m.group(1))
+                # a layer split prints one line per stage; a slot's session is the sum of its stages' carves
+                self.state["per_slot_bytes"] += round(float(m.group(3)) * (1 << 30))
+                continue
+            m = self.DRAFTER.search(line)
+            if m:
+                self.state["drafter_bytes"] = int(m.group(3)) * 1048576   # per slot, where the drafters live
+        return dict(self.state)
+
+
 def conversation_cache_view(info: dict, hist: list, totals: dict, parked: dict) -> dict:
     """#596: the Monitor's Conversation cache card: the parked conversations (the engine's opt-in
     --conversation-cache-mib: budget, slots, what its log says) and how much of the prompts the cache gave back."""
@@ -2940,6 +2988,7 @@ class Service:
         # turn before the answer instead of the top of the prompt, so switching it keeps the cached conversation
         self.effort_end = False
         self.conv_log = ConvCacheLog()                  # #596: the parked conversations, from the engine's log
+        self.slot_carve_log = SlotCarveLog()            # the batch slots' device carveouts, from the engine's log
         self.gpu_hist: collections.deque = collections.deque(maxlen=60)   # the VRAM tile's sparkline
         self.gpu_lock = threading.Lock()
         self.config_path = None                         # #564: the run config the web page's Settings view edits
@@ -3441,6 +3490,13 @@ class Service:
         kv_streaming = (eng.get("kv_resident") or 0) > 0 and kv_bpt > 0 and kv_ctx > 0
         kv_session = int(kv_bpt) * int(kv_ctx) if kv_streaming else 0
         kv_slots_reserved = kv_session * int(eng.get("batch_slots") or 0)
+        # the slots' device side: each session's carve (the engine logs it at load, "%d slot sessions ... %f GiB
+        # each") plus, with --batch-mtp, its drafter's private state; hidden where the engine said nothing (older
+        # engines, or a replica front that has no log), as with any figure it cannot back
+        carve = self.slot_carve_log.poll(getattr(self.engine, "log_path", None), getattr(self.engine, "log_start", None))
+        sessions = int(carve.get("sessions") or 0)
+        per_slot = int(carve.get("per_slot_bytes") or 0) + int(carve.get("drafter_bytes") or 0)
+        slot_carve = per_slot * sessions
         slots = []
         for s in (self.engine.slots_view() if hasattr(self.engine, "slots_view") else []):
             tokens = (s.get("context_tokens") or s.get("held_tokens") or 0) if s["state"] == "idle" \
@@ -3465,6 +3521,8 @@ class Service:
                 "conv_budget_bytes": mib(eng.get("conversation_cache_mib")) or None,
                 "engine_rss": engine_rss, "vision_bytes": vision_rss, "server_bytes": rss(os.getpid()),
                 "kv_session_bytes": kv_session or None, "kv_slot_reserve_bytes": kv_slots_reserved or None,
+                "slot_carve_bytes": slot_carve or None,
+                "slot_carve_per_slot": per_slot or None,
                 "slots": slots}
 
     def metrics(self, all_requests=False) -> dict:

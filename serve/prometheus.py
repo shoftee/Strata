@@ -162,3 +162,6 @@ def strata(m: dict, out: list, lab: str):
     metric("ram_kv_slot_reserve_bytes", "gauge",
            "System RAM reserved at load for the batch slots' pinned full-context K/V copies "
            "(memory.kv_slot_reserve_bytes).", mem.get("kv_slot_reserve_bytes"))
+    metric("gpu_slot_carve_bytes", "gauge",
+           "The batch slots' device memory, as the engine carved their sessions at load (memory.slot_carve_bytes).",
+           mem.get("slot_carve_bytes"))
