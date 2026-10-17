@@ -302,6 +302,34 @@ class MemoryBreakdown(unittest.TestCase):
         slots = svc._memory(self.HW, self.PARKED)["slots"]
         self.assertEqual([(s["tokens"], s["kv_bytes"]) for s in slots], [(1000, 12672000), (520, 6589440)])
 
+    def test_batch_slots_reserve_their_pinned_kv(self):
+        """KV streaming: every session - the main one and each batch slot - pins a full-context K/V copy in RAM at
+        load (session_init -> qsa_state_init) that never returns until the engine exits; the Monitor's RAM bar gets
+        the slots' share as its own segment, not inside the engine's other RSS."""
+        svc = self.service()
+        svc.engine.info = {"kv_bytes_per_token": 12672, "context": 262144, "batch_slots": 2, "kv_resident": 32768}
+        m = svc._memory(self.HW, self.PARKED)
+        self.assertEqual(m["kv_session_bytes"], 12672 * 262144)
+        self.assertEqual(m["kv_slot_reserve_bytes"], 2 * 12672 * 262144)
+
+    def test_no_reserve_without_kv_streaming_or_slots(self):
+        """Without `--kv-resident` the K/V lives in the VRAM pools, so there is nothing pinned per session to show."""
+        svc = self.service()
+        svc.engine.info = {"kv_bytes_per_token": 12672, "context": 262144, "batch_slots": 2}
+        m = svc._memory(self.HW, self.PARKED)
+        self.assertIsNone(m["kv_session_bytes"])
+        self.assertIsNone(m["kv_slot_reserve_bytes"])
+        svc.engine.info = {"kv_bytes_per_token": 12672, "context": 262144, "kv_resident": 32768}
+        m = svc._memory(self.HW, self.PARKED)
+        self.assertIsNone(m["kv_slot_reserve_bytes"])
+
+    def test_the_ram_bar_shows_the_slot_reserve_as_its_own_segment(self):
+        web = Path(__file__).parent / "web"
+        js = (web / "app.js").read_text(encoding="utf-8")
+        self.assertIn('kind: "slotres", label: "Batch slot reserve"', js)
+        self.assertIn("engineRss - arena - conv - kvReserve", js)
+        self.assertIn('slotres: "slotres"', js)
+
     def test_metrics_carries_memory(self):
         svc = self.service()
         httpd = serve(svc, port=0)

@@ -264,8 +264,8 @@ function renderTotals(t) {
 }
 // ------------------------------------------------------------------ Monitor: memory breakdown + per-slot views
 // one hue per memory type (the --st-mem-* colours in app.css); a segment's kind picks its colour and tooltip
-const MEM_COLOR = {experts: "experts", gpu: "gpu", engine: "engine", conv: "conv", vision: "vision",
-                   server: "server", system: "system", expertcache: "experts", slots: "gpu",
+const MEM_COLOR = {experts: "experts", gpu: "gpu", engine: "engine", conv: "conv", slotres: "slotres",
+                   vision: "vision", server: "server", system: "system", expertcache: "experts", slots: "gpu",
                    // red and grey, as the System RAM bar uses for the same two things
                    visiongpu: "engine", othergpu: "system"};
 const memColor = (kind) => `var(--st-mem-${MEM_COLOR[kind] || "system"})`;
@@ -321,7 +321,9 @@ function renderMemory(mem, eng) {
   const arena = mem.arena_bytes || 0, conv = mem.conv_bytes || 0, vision = mem.vision_bytes || 0, server = mem.server_bytes || 0;
   const engineRss = mem.engine_rss || 0, expertCache = mem.expert_cache_bytes || 0;
   const kvTotal = (mem.slots || []).reduce((a, s) => a + (s.kv_bytes || 0), 0);
-  const engineRuntime = Math.max(0, engineRss - arena - conv);
+  const kvReserve = mem.kv_slot_reserve_bytes || 0;   // the batch slots' pinned full-context K/V copies (KV streaming)
+  const kvSession = mem.kv_session_bytes || 0;
+  const engineRuntime = Math.max(0, engineRss - arena - conv - kvReserve);
   const gpuMem = expertCache + kvTotal;   // the card's device memory: expert cache + the running slots' KV
   const segs = [];
   if (arena) segs.push({kind: "experts", label: "Model experts in RAM", bytes: arena,
@@ -334,6 +336,13 @@ function renderMemory(mem, eng) {
   }
   if (conv) segs.push({kind: "conv", label: "Conversation cache", bytes: conv,
     tip: tipHtml("Conversation cache", [["Parked now", bytesStr(conv)], ["Conversations", fmt(mem.conv_parked)], ["Budget", bytesStr(mem.conv_budget_bytes)]], "Whole conversations parked in RAM so a follow-up reuses them.")});
+  if (kvReserve) {
+    const n = (eng && eng.batch_slots) || (kvSession ? Math.round(kvReserve / kvSession) : 0);
+    segs.push({kind: "slotres", label: "Batch slot reserve", bytes: kvReserve,
+      tip: tipHtml("Batch slot reserve",
+        kvSession ? [["Per slot", bytesStr(kvSession)], ["Slots", fmt(n)]] : null,
+        "Every batch slot keeps a full-context K/V copy pinned in RAM from load (KV streaming). It never shrinks or moves with the tokens and is freed only when the model unloads.")});
+  }
   const strataOther = engineRuntime + vision + server;
   if (strataOther) {
     const rows = [];
@@ -341,7 +350,7 @@ function renderMemory(mem, eng) {
     if (vision) rows.push(["Vision encoder", bytesStr(vision)]);
     if (server) rows.push(["Strata server", bytesStr(server)]);
     segs.push({kind: "engine", label: "Strata (other)", bytes: strataOther,
-      tip: tipHtml("Strata (other)", rows, "Everything Strata holds in RAM besides the expert arena and the parked conversations: the engine's other memory (non-expert weights, KV buffers, runtime), the vision encoder and the web server.")});
+      tip: tipHtml("Strata (other)", rows, "Everything Strata holds in RAM besides the expert arena and the parked conversations: the engine's other memory (non-expert weights, runtime and, with KV streaming, the main session's own pinned K/V copy), the vision encoder and the web server.")});
   }
   const accounted = arena + conv + engineRuntime + vision + server + (mem.unified ? gpuMem : 0);
   const other = Math.max(0, (mem.ram_used || 0) - accounted);
@@ -379,6 +388,7 @@ function renderCtxSlots(live, eng, mem) {
     const tip = tipHtml(`Slot ${s.slot} · ${s.state}`,
       [["Context", ctx ? `${fmt(used)} / ${fmt(ctx)} tokens` : `${fmt(used)} tokens`],
        k && k.kv_bytes ? ["KV footprint", `${gb(k.kv_bytes, 2)} GB`] : null,
+       mem && mem.kv_session_bytes ? ["Reserved", `${gb(mem.kv_session_bytes, 2)} GB pinned at load`] : null,
        s.tok_s ? ["Speed", `${fmt(s.tok_s, 1)} tok/s`] : null]);
     return `<div class="ctx-slot" data-tip="${esc(tip)}" tabindex="0"><span class="ctx-slot__name">Slot ${s.slot}</span>` +
       `<div class="ctx-slot__bar"><div style="width:${(frac * 100).toFixed(1)}%;background:${color[s.state] || "var(--st-mem-system)"}"></div></div>` +

@@ -97,7 +97,9 @@ the count the engine reports (`INFO batch_slots=N`), and `GET /v1/status` says i
 
 Every slot's session takes VRAM that the expert cache would otherwise hold: 0.56 GiB at a 32K context with 8-bit
 KV, more with a longer context unless the KV cache streams (`--kv-resident`: then only the attention's 32K window
-stays in VRAM, and each slot's whole KV cache takes pinned RAM - 1.6 GB at 128K). On a card whose experts mostly run
+stays in VRAM, and each slot's whole KV cache takes pinned RAM - 1.6 GB at 128K). The Monitor tab's System RAM bar
+shows this reservation as its own segment ("Batch slot reserve"): one full-context pinned K/V copy per slot, allocated
+at load, kept until the model unloads. On a card whose experts mostly run
 on the CPU, a batch also reads about as many distinct experts as the requests one by one (different conversations
 route to different experts), so the gain is in **latency** (nobody waits for a whole answer), and a request alone
 runs slower (the smaller expert cache): 11-24 % on a 12 GB card, see the measurements below.

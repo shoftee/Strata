@@ -158,3 +158,7 @@ def strata(m: dict, out: list, lab: str):
     metric("cpu", "gauge", "CPU busy, percent (hardware.cpu).", hw.get("cpu"))
     metric("ram_used_bytes", "gauge", "RAM in use (hardware.ram_used).", hw.get("ram_used"))
     metric("ram_total_bytes", "gauge", "RAM (hardware.ram_total).", hw.get("ram_total"))
+    mem = m.get("memory") or {}
+    metric("ram_kv_slot_reserve_bytes", "gauge",
+           "System RAM reserved at load for the batch slots' pinned full-context K/V copies "
+           "(memory.kv_slot_reserve_bytes).", mem.get("kv_slot_reserve_bytes"))

@@ -3432,6 +3432,15 @@ class Service:
             engine_gpu = drm_memory_bytes(getattr(getattr(self.engine, "proc", None), "pid", None))
             vision_gpu = drm_memory_bytes(vision_pid)
         kv_bpt = eng.get("kv_bytes_per_token") or 0
+        # KV streaming (`--kv-resident`): every session - the main one and each batch slot - pins a full-context
+        # K/V copy in RAM at load (session_init -> qsa_state_init). The reservation never shrinks or returns until
+        # the engine exits, so the Monitor delineates it instead of leaving it inside the engine's other RSS. The
+        # session's own size comes from the engine's per-token figure; "batch_slots" is what the engine actually
+        # carved (it may run fewer than asked).
+        kv_ctx = eng.get("context") or getattr(self.engine, "max_context", 0) or 0
+        kv_streaming = (eng.get("kv_resident") or 0) > 0 and kv_bpt > 0 and kv_ctx > 0
+        kv_session = int(kv_bpt) * int(kv_ctx) if kv_streaming else 0
+        kv_slots_reserved = kv_session * int(eng.get("batch_slots") or 0)
         slots = []
         for s in (self.engine.slots_view() if hasattr(self.engine, "slots_view") else []):
             tokens = (s.get("context_tokens") or s.get("held_tokens") or 0) if s["state"] == "idle" \
@@ -3455,6 +3464,7 @@ class Service:
                 "conv_bytes": int(parked.get("bytes") or 0) or None, "conv_parked": parked.get("parked"),
                 "conv_budget_bytes": mib(eng.get("conversation_cache_mib")) or None,
                 "engine_rss": engine_rss, "vision_bytes": vision_rss, "server_bytes": rss(os.getpid()),
+                "kv_session_bytes": kv_session or None, "kv_slot_reserve_bytes": kv_slots_reserved or None,
                 "slots": slots}
 
     def metrics(self, all_requests=False) -> dict:

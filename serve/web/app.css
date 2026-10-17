@@ -144,11 +144,11 @@ main { flex: 1; min-height: 0; display: flex; }
 /* one hue per memory type, distinct in both themes; the JS maps a segment's kind to these */
 :root {
   --st-mem-experts: #10b981; --st-mem-gpu: #8b5cf6; --st-mem-engine: #ef4444; --st-mem-conv: #3b82f6;
-  --st-mem-vision: #f59e0b; --st-mem-server: #ec4899; --st-mem-system: #94a3b8;
+  --st-mem-slotres: #06b6d4; --st-mem-vision: #f59e0b; --st-mem-server: #ec4899; --st-mem-system: #94a3b8;
 }
 [data-theme="dark"] {
   --st-mem-experts: #34d399; --st-mem-gpu: #a78bfa; --st-mem-engine: #f87171; --st-mem-conv: #60a5fa;
-  --st-mem-vision: #fbbf24; --st-mem-server: #f472b6; --st-mem-system: #64748b;
+  --st-mem-slotres: #22d3ee; --st-mem-vision: #fbbf24; --st-mem-server: #f472b6; --st-mem-system: #64748b;
 }
 .mem-group { display: flex; flex-direction: column; gap: 6px; margin-top: var(--st-s-2); }
 .mem-bar { display: flex; gap: 2px; height: 12px; border-radius: var(--st-r-pill); background: var(--st-surface-2);
