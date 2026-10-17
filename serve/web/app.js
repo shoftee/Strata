@@ -334,8 +334,8 @@ function slotCarveTip(mem, carvePer) {
 function reserveTip(mem, kvSession) {
   const slots = (mem.slots || []);
   const rows = slots.length ? slots.map((s) =>
-    [`Slot ${s.slot} · ${s.state === "idle" ? "idle" : `${fmt(s.tokens)} tok`}`,
-     kvSession ? `${gb(kvSession, 2)} pinned · ${gb(s.kv_bytes || 0, 2)} held` : null])
+    [`Slot ${s.slot}`,
+     `${s.state === "idle" ? "idle · " : `${fmt(s.tokens)} tok · `}${kvSession ? `${gb(s.kv_bytes || 0, 2)} / ${gb(kvSession, 2)} GB` : ""}`])
     : (kvSession ? [["Per slot", bytesStr(kvSession)]] : null);
   return tipHtml("Batch slot reserve", rows,
     "Each slot's full-context K/V copy - where its KV tokens live - pinned in RAM from load (KV streaming). It " +
