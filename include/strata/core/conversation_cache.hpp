@@ -350,6 +350,21 @@ public:
         return false;
     }
 
+    // The bytes evict_oldest() could hand back, counted the same way it walks the entries: every parked
+    // conversation except a pinned shared prefix and the guarded (borrowed) donor, which stay.  The
+    // physical-RAM admission gate in generate.cpp compares free RAM plus this figure against the snapshot
+    // before it drops anything: that sum is the furthest its eviction loop can ever reach, so a snapshot
+    // that does not fit beside it is refused with the parked conversations left alone.  Evicting them
+    // first and refusing anyway costs each of their owners a full prompt read for a park that never
+    // happened.  The retained K/V is not included: the gate's figure already excludes the buffers the
+    // incoming capture reuses.
+    size_t releasable_bytes() const {
+        size_t out = 0;
+        for (size_t i = 0; i < entries_.size(); ++i)
+            if (!entries_[i].pinned() && !(guarded_ != 0 && serials_[i] == guarded_)) out += entries_[i].bytes();
+        return out;
+    }
+
     // #879: every parked conversation (pinned ones too) and the retained K/V go - after non-finite logits any of them
     // may carry the poison.  Returns how many were parked.
     size_t clear() {

@@ -9039,6 +9039,25 @@ int main(int argc, char** argv) {
                     return strata::core::conversation_memory_admit(
                         mem ? std::optional<uint64_t>(mem->available) : std::nullopt, additional, floor);
                 };
+                // The loop below frees one parked conversation at a time and re-reads the free RAM after each,
+                // so a snapshot that fits once some of them went is admitted with exactly that many gone.  Free
+                // RAM plus every entry eviction is allowed to take is the furthest it can ever reach, so when
+                // the snapshot plus the floor still exceed that, refuse now instead of dropping conversations
+                // whose next turn reads its whole prompt again for a park that is refused anyway (measured: 176
+                // of 325 refusals on a 75 GiB-capped 8060S box evicted every conversation eviction could take
+                // and were refused anyway, see DETAILS.md).  Unknown telemetry admits nothing however much is
+                // evicted, so it evicts nothing either.
+                if (!admit() && !strata::core::conversation_mem_eviction_can_admit(
+                        mem ? std::optional<uint64_t>(mem->available) : std::nullopt, additional, floor,
+                        conversations.releasable_bytes())) {
+                    std::fprintf(stderr, "strata serve: conversation cache: skip parking (physical RAM admission; need %zu MiB plus "
+                                 "%lld MiB floor, %s; evicting all %zu parked conversation%s (%zu MiB) would not "
+                                 "be enough, keeping them all)\n",
+                                 additional >> 20, (long long) o.conversation_cache_min_free_mib, ram_note(mem).c_str(),
+                                 conversations.size(), conversations.size() == 1 ? "" : "s",
+                                 conversations.releasable_bytes() >> 20);
+                    return true;
+                }
                 while (!admit() && conversations.size() > 0 && evicted < conversations.slots() &&
                        conversations.evict_oldest())
                     ++evicted;

@@ -71,4 +71,18 @@ inline bool conversation_memory_admit(std::optional<uint64_t> available,
     return available && *available >= floor && allocation <= *available - floor;
 }
 
+/// Whether evicting parked conversations could ever admit this allocation: the free RAM plus everything
+/// eviction is allowed to hand back has to reach the allocation plus the floor.  Above that line the caller
+/// refuses without evicting, so the parked conversations are not dropped for a park that fails anyway -
+/// each of their next turns would read its whole prompt again.  Unknown telemetry returns false: it admits
+/// nothing at any amount of eviction, so evicting before refusing could only cost.
+inline bool conversation_mem_eviction_can_admit(std::optional<uint64_t> available, uint64_t allocation,
+                                                uint64_t floor, uint64_t releasable) {
+    if (!available) return false;
+    // Clamped rather than summed: a byte count near UINT64_MAX is not real, but the tests feed it, and an
+    // overflow here would turn "cannot fit, keep them" into "might fit, evict them".
+    const uint64_t room = releasable >= UINT64_MAX - *available ? UINT64_MAX : *available + releasable;
+    return conversation_memory_admit(room, allocation, floor);
+}
+
 } // namespace strata::core

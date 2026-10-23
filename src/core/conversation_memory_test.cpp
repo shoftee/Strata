@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <optional>
 #include <sstream>
 
 #if defined(_WIN32)
@@ -49,6 +50,21 @@ int main() {
                                    std::numeric_limits<uint64_t>::max(), 0), "maximal exact bound");
     check(!conversation_memory_admit(std::numeric_limits<uint64_t>::max(),
                                     std::numeric_limits<uint64_t>::max(), 1), "maximal sum overflow rejected");
+    // Whether eviction is worth starting at all: the free RAM plus every byte the cache could hand back
+    // has to reach the snapshot plus the floor, or the gate refuses and keeps the parked conversations.
+    using limits = std::numeric_limits<uint64_t>;
+    check(conversation_mem_eviction_can_admit(100, 40, 60, 0), "it fits beside the floor: no eviction needed");
+    check(!conversation_mem_eviction_can_admit(60, 40, 60, 0), "nothing releasable: the same refusal as admit()");
+    check(conversation_mem_eviction_can_admit(60, 40, 60, 40), "40 bytes of parked conversations pay for the rest");
+    check(!conversation_mem_eviction_can_admit(60, 40, 60, 39),
+          "one byte short: refuse and keep every parked conversation");
+    check(!conversation_mem_eviction_can_admit(20, 40, 60, 40),
+          "eviction cannot lift the free RAM over the floor and still fit the allocation");
+    check(!conversation_mem_eviction_can_admit(std::nullopt, 0, 0, limits::max()),
+          "unknown telemetry: eviction changes nothing, so evict nothing");
+    check(conversation_mem_eviction_can_admit(limits::max(), 100, 10, 1000), "a maximal reading stays admissible");
+    check(conversation_mem_eviction_can_admit(limits::max() - 5, 20, 0, 10),
+          "the released bytes do not wrap the free side into a refusal");
     // Test the real provider without assuming any particular amount of free RAM.
     const auto available = available_host_bytes();
     check(!available || conversation_memory_admit(available, 0, 0), "provider returns bytes or unknown");

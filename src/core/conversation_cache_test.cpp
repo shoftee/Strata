@@ -153,6 +153,69 @@ int main() {
         check(!cache.evict_oldest(), "the gate's loop can reach an empty cache: false");
         check(cache.size() == 0 && cache.evictions() == 2, "evict_oldest on an empty cache is a no-op");
     }
+    {
+        // releasable_bytes(): the bytes the physical-RAM gate in generate.cpp compares a snapshot against
+        // before it evicts anything.  It has to count exactly the entries evict_oldest() takes and no others:
+        // too many and the gate evicts conversations it then refuses the park for anyway (what this fixes),
+        // too few and it keeps a conversation its eviction loop would have needed to drop.
+        ConversationCache cache(4096, 4);
+        check(cache.releasable_bytes() == 0, "an empty cache promises nothing");
+        cache.put(image({1, 2, 3}));
+        cache.put(image({9, 8, 7}));
+        const size_t both = cache.bytes();
+        check(cache.releasable_bytes() == both, "every parked conversation counts: any of them could go");
+        check(cache.evict_oldest() && cache.releasable_bytes() == both - image({1, 2, 3}).bytes(),
+              "evicting one lowers the promise by exactly its bytes");
+        const size_t promised = cache.releasable_bytes(), already = both - cache.bytes();
+        while (cache.evict_oldest()) {}
+        check(both - cache.bytes() - already == promised, "draining the cache releases exactly what was promised");
+        check(cache.size() == 0 && cache.releasable_bytes() == 0, "an emptied cache promises nothing again");
+    }
+    {   // the two entries evict_oldest() skips are not counted either: the pinned shared prefix and the
+        // guarded (borrowed) donor stay parked, so the gate must not count their RAM as winnable
+        ConversationCache cache(1 << 20, 4);
+        auto pinned = image({1, 2, 3});
+        pinned.checkpoints.push_back(ConversationCheckpoint{});
+        pinned.checkpoints.back().ids = {1, 2};
+        pinned.checkpoints.back().pinned = true;
+        pinned.checkpoints.back().gdn.resize(64, 1);
+        const size_t other = image({9, 8, 7}).bytes();
+        check(cache.releasable_bytes() == 0 && cache.put(std::move(pinned)), "park the pinned prefix first");
+        check(cache.releasable_bytes() == 0, "a cache holding only a pinned conversation has nothing to release");
+        cache.put(image({9, 8, 7}));
+        check(cache.releasable_bytes() == other, "only the unpinned conversation counts");
+        const size_t promised = cache.releasable_bytes(), before = cache.bytes();
+        while (cache.evict_oldest()) {}
+        check(before - cache.bytes() == promised && cache.size() == 1,
+              "eviction stops at the pinned one, having released exactly the promised bytes");
+        check(cache.best(std::vector<int32_t>{1, 2, 9, 9}, {}, true).tokens == 2, "the pinned prefix is still found");
+        cache.put(image({9, 8, 7}));
+        cache.put(image({4, 5, 6}));
+        // a parked conversation matches a prompt one token longer than itself (its last token starts the
+        // next verify window), so the query carries the token the next turn would add
+        const uint64_t donor = cache.best(std::vector<int32_t>{4, 5, 6, 7}, {}, true).serial;
+        check(donor != 0, "a parked conversation has a serial to guard");
+        cache.guard(donor);
+        check(cache.releasable_bytes() == other, "the guarded donor's bytes are not counted either");
+        check(cache.evict_oldest() && cache.size() == 2 && cache.releasable_bytes() == 0,
+              "eviction takes the unguarded one: with the donor guarded and a pinned prefix, nothing is left");
+        cache.unguard();
+        check(cache.releasable_bytes() == image({4, 5, 6}).bytes(), "unguarding leaves the donor's own bytes");
+    }
+    {   // the retained K/V counts against the cache's byte budget but is not something eviction hands back:
+        // the gate's allocation figure already subtracts the buffers this capture reuses
+        ConversationCache cache(1 << 20, 4);
+        cache.put(image({1, 2, 3}));
+        std::vector<ConversationKv> kv(1);
+        kv[0].cells = 3;
+        kv[0].k.resize(64, 1);
+        cache.retain(std::move(kv), 3);
+        check(cache.retained_bytes() > 0, "K/V retained for the next capture");
+        check(cache.bytes() > cache.releasable_bytes() && cache.releasable_bytes() == image({1, 2, 3}).bytes(),
+              "retention grows the budget figure, not the releasable one");
+        check(cache.take_reuse().kv.size() == 1 && cache.releasable_bytes() == image({1, 2, 3}).bytes(),
+              "taking the reuse does not change what eviction could release");
+    }
     {   // the RAM gate's eviction skips a conversation that holds a pinned shared prefix, and says so (false)
         ConversationCache cache(1 << 20, 4);
         auto pinned = image({1, 2, 3});

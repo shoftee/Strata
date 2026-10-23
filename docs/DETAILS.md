@@ -1152,6 +1152,24 @@ Unknown telemetry or insufficient RAM skips parking, and the same figure and flo
 decide whether a session file may be saved or restored (below). An 8 GiB budget
 is a cap, not a recommendation for every machine.
 
+A refusal here used to evict first: the gate dropped parked conversations one at a time, re-reading
+the free RAM after each, and when the snapshot still did not fit it skipped the park anyway - with
+those conversations gone, so their next turns read their whole prompts again for a park that never
+happened. It now compares the snapshot plus the floor against the free RAM plus everything eviction
+is allowed to hand back (every parked conversation except a pinned shared prefix and the borrowed
+donor) before dropping anything: under that line no amount of eviction admits the snapshot, so the
+parked conversations stay. When eviction can reach the line it runs exactly as before, one
+conversation at a time, stopping at the first reading that fits, so a snapshot that needs only some
+of them is admitted with exactly that many gone. Measured on a Ryzen AI MAX+ 395 / Radeon 8060S box
+(125 GiB RAM, a 75 GiB cgroup cap, `--conversation-cache-min-free-mib 4096`, Qwen3.8-Flash-Next
+IQ3_S, engine 0.1.45): of 325 refusals by this gate, 176 had already dropped every conversation
+eviction could take before being refused, which is the state the comparison now refuses up front,
+and 32 parks were admitted after evicting 1, 2 and 3 conversations (11, 10 and 11), the partial
+case the loop still handles. Unknown telemetry refuses without evicting: it admits nothing however
+much RAM comes back. `conversation_cache_test` checks that the byte figure counts exactly what
+`evict_oldest()` can release (a pinned prefix and the guarded donor stay out of it),
+`conversation_memory_test` the comparison itself; both are CPU only, no model.
+
 **The RAM figure (`available_host_bytes()`).** The headroom is the smallest of three
 numbers, sampled each time it is asked and not a reservation (other writers can take the
 room afterwards):
