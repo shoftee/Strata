@@ -238,9 +238,25 @@ function renderConvCache(c) {
   if (c.enabled) {
     $("cc-slots-text").textContent = `${fmt(c.parked)} / ${fmt(c.slots)}`;
     $("cc-slots-bar").style.width = pct(c.parked, c.slots);
-    const budget = c.budget_mib * 1048576;
-    $("cc-mem-text").textContent = `${gb(c.bytes)} / ${gb(budget)} GB`;
+    const budget = c.budget_bytes || c.budget_mib * 1048576;
+    // used | free | what the engine's own RAM measurement says it cannot fill (the red part at the right end:
+    // a snapshot bigger than the free RAM beside --conversation-cache-min-free-mib is refused parking)
+    const blocked = c.blocked_bytes || 0;
+    $("cc-mem-text").textContent = `${gb(c.bytes)} / ${gb(budget)} GB${blocked ? ` · ${gb(blocked)} GB unusable` : ""}`;
     $("cc-mem-bar").style.width = pct(c.bytes, budget);
+    const seg = $("cc-mem-block");
+    seg.hidden = !blocked;
+    seg.style.width = pct(blocked, budget);
+    seg.setAttribute("aria-label", blocked ? `Unusable budget: ${gb(blocked)} GB of ${gb(budget)} GB` : "");
+    if (blocked) seg.dataset.tip = tipHtml("Budget the RAM guard blocks", [
+      ["Parked now", `${gb(c.bytes)} GB`],
+      ["Free RAM the engine measured", `${gb(c.ram_available_bytes)} GB (${c.ram_source || "unknown source"})`],
+      ["Kept in reserve", `${gb(c.ram_floor_bytes)} GB`],
+      ["This budget can still take", `${gb(c.free_bytes)} GB`],
+      ["Measured", since(c.ram_at)],
+    ], "A conversation parks only if its snapshot fits beside the reserved RAM, so everything the budget offers " +
+       "beyond that is space no conversation can use while the host is this full - those conversations read their " +
+       "prompt again. Lower --conversation-cache-min-free-mib or free RAM to shrink the red part.");
   }
   $("cc-sum").textContent = c.requests ? `${fmt(c.requests_reused)} of ${fmt(c.requests)} requests reused part of their prompt` : "";
   const share = c.prompt_tokens ? ` (${fmt((100 * c.reused_tokens) / c.prompt_tokens)}% of all prompt tokens)` : "";
@@ -249,10 +265,12 @@ function renderConvCache(c) {
     ["Last request", c.last_prompt != null ? `${fmt(c.last_reused || 0)} of ${fmt(c.last_prompt)} prompt tokens reused` : null],
     ["Reused since start", c.requests ? `${fmt(c.reused_tokens)} tokens${share}` : null],
     ["Parked / restored", c.enabled ? `${fmt(c.parks)} / ${fmt(c.restores)}${c.evictions ? ` · ${fmt(c.evictions)} evicted` : ""}` : null],
+    ["RAM still parkable", c.ram_available_bytes != null
+      ? `${gb(Math.max(0, c.ram_available_bytes - (c.ram_floor_bytes || 0)))} GB beside ${gb(c.ram_floor_bytes)} GB reserve, ${since(c.ram_at)}` : null],
     ["Last switch", c.enabled ? event : null],
   ]);
   $("cc-note").textContent = c.enabled
-    ? "A request that continues a parked conversation gets its state back instead of reading it again; the oldest goes when the slots or the memory are full."
+    ? "A request that continues a parked conversation gets its state back instead of reading it again; the oldest goes when the slots or the memory are full. The red part at the end of the memory bar is budget the engine measured it cannot fill: a conversation parks only if its snapshot fits beside --conversation-cache-min-free-mib of free RAM."
     : "The engine keeps the last conversation's state, so a follow-up reads only what is new. To keep several conversations (agents taking turns), add \"--conversation-cache-mib\", \"8192\" to the run config's args (docs/DETAILS.md).";
 }
 

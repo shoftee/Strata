@@ -42,6 +42,11 @@ a{color:var(--st-accent-text);text-decoration:none} a:hover{text-decoration:unde
 .st-progress[data-tone="info"] .st-progress__bar{background:var(--st-info)}
 .st-progress[data-tone="warn"] .st-progress__bar{background:var(--st-warn)}
 .st-progress[data-tone="danger"] .st-progress__bar{background:var(--st-danger)}
+/* a budget bar with a part the engine cannot use: used | free | blocked, in that order left to right */
+.st-progress--stacked{display:flex}
+.st-progress--stacked .st-progress__bar{border-radius:0}
+.st-progress__free{flex:1;min-width:0;background:transparent}
+.st-progress__block{height:100%;min-width:3px;border:0;padding:0;cursor:help;background:var(--st-danger);transition:width var(--st-dur) var(--st-ease)}
 /* gauge: see README for SVG markup (stroke-dasharray on a 270° arc) */
 .st-gauge{position:relative;width:120px;height:120px}
 .st-gauge__track{stroke:var(--st-surface-2)} .st-gauge__fill{stroke:var(--st-accent)}

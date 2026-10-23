@@ -1207,6 +1207,16 @@ static std::string ram_note(const std::optional<strata::core::HostMemoryReading>
     return std::to_string(mem->available >> 20) + " MiB available, source " + strata::core::memory_source_name(mem->source);
 }
 
+// the same reading as key=value, for the Monitor's Conversation cache card: every conversation-cache line carries
+// the guard figure that decided it, so the card can show how much of the --conversation-cache-mib budget the free
+// RAM beside --conversation-cache-min-free-mib cannot hold (serve/server.py's ConvCacheLog reads these keys).  A
+// missing reading reports -1 rather than a guess: unknown telemetry never admits a snapshot.
+static std::string ram_kv(const std::optional<strata::core::HostMemoryReading>& mem, uint64_t floor) {
+    return "ram_available_mib=" + std::string(mem ? std::to_string(mem->available >> 20) : "-1") +
+           " ram_floor_mib=" + std::to_string(floor >> 20) +
+           " ram_source=" + std::string(mem ? strata::core::memory_source_name(mem->source) : "none");
+}
+
 // ---- issue #31: what the watchdog prints before it stops a stalled engine
 struct MemSample {
     unsigned long long faults = 0, rss_mib = 0, avail_mib = 0, commit_mib = 0;   // faults: hard (Linux) / all (Windows)
@@ -9052,10 +9062,10 @@ int main(int argc, char** argv) {
                         conversations.releasable_bytes())) {
                     std::fprintf(stderr, "strata serve: conversation cache: skip parking (physical RAM admission; need %zu MiB plus "
                                  "%lld MiB floor, %s; evicting all %zu parked conversation%s (%zu MiB) would not "
-                                 "be enough, keeping them all)\n",
+                                 "be enough, keeping them all; %s\n",
                                  additional >> 20, (long long) o.conversation_cache_min_free_mib, ram_note(mem).c_str(),
                                  conversations.size(), conversations.size() == 1 ? "" : "s",
-                                 conversations.releasable_bytes() >> 20);
+                                 conversations.releasable_bytes() >> 20, ram_kv(mem, floor).c_str());
                     return true;
                 }
                 while (!admit() && conversations.size() > 0 && evicted < conversations.slots() &&
@@ -9089,16 +9099,20 @@ int main(int argc, char** argv) {
                 const auto mem_after = strata::core::sample_host_memory();
                 if (!strata::core::conversation_memory_admit(
                         mem_after ? std::optional<uint64_t>(mem_after->available) : std::nullopt, 0, floor)) {
-                    std::fprintf(stderr, "strata serve: conversation cache: skip parking (RAM floor after capture: %lld MiB needed, %s)\n",
-                                 (long long) o.conversation_cache_min_free_mib, ram_note(mem_after).c_str());
+                    std::fprintf(stderr, "strata serve: conversation cache: skip parking (RAM floor after capture: %lld MiB needed, %s; %s)\n",
+                                 (long long) o.conversation_cache_min_free_mib, ram_note(mem_after).c_str(),
+                                 ram_kv(mem_after, floor).c_str());
                     return true;
                 }
                 const size_t snapshot_bytes = image.bytes();
                 const bool stored = conversations.put(std::move(image), held);
-                std::fprintf(stderr, "strata serve: conversation cache: %s %zu tokens in %.1f ms; parked=%zu bytes=%zu evictions=%zu snapshot_bytes=%zu reused_kv_bytes=%zu\n",
+                // the keys carry `mem_after`: the free RAM measured with this snapshot already charged to the
+                // process, which is the room the card has left to fill beside the floor
+                std::fprintf(stderr, "strata serve: conversation cache: %s %zu tokens in %.1f ms; parked=%zu bytes=%zu evictions=%zu snapshot_bytes=%zu reused_kv_bytes=%zu; %s\n",
                              stored ? "parked" : "skipped", live.size(),
                              std::chrono::duration<double, std::milli>(Clock::now() - t0).count(),
-                             conversations.size(), conversations.bytes(), conversations.evictions(), snapshot_bytes, reused_bytes);
+                             conversations.size(), conversations.bytes(), conversations.evictions(), snapshot_bytes,
+                             reused_bytes, ram_kv(mem_after, floor).c_str());
             } catch (const std::bad_alloc&) {
                 // The active state has not been touched. Continue with normal
                 // prompt processing rather than killing a serving process.

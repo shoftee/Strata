@@ -681,6 +681,9 @@ class ConvCacheLog:
     EVENT = re.compile(r"conversation cache: (parked|skipped|restored) (\d+) tokens.*?parked=(\d+) bytes=(\d+)"
                        r"(?: evictions=(\d+))?(?: snapshot_bytes=(\d+))?")
     DROPPED = re.compile(r"conversation cache: dropped \d+ superseded .*?parked=(\d+)")
+    # every conversation-cache line the RAM guard decided carries its own reading (engine 0.1.46+):
+    # "ram_available_mib=6643 ram_floor_mib=1024 ram_source=cgroup" (-1 / none when it could not measure)
+    RAM = re.compile(r"ram_available_mib=(-?\d+) ram_floor_mib=(\d+) ram_source=([a-z_]+)")
     READ_MAX = 1 << 20                                  # at most the last MiB of new lines per read
 
     def __init__(self):
@@ -689,7 +692,8 @@ class ConvCacheLog:
 
     def reset(self):
         self.state = {"parked": 0, "bytes": 0, "evictions": 0, "parks": 0, "restores": 0, "last_event": None,
-                      "last_tokens": None, "last_at": None, "snapshot_bytes": None, "snapshot_tokens": None}
+                      "last_tokens": None, "last_at": None, "snapshot_bytes": None, "snapshot_tokens": None,
+                      "ram_available_bytes": None, "ram_floor_bytes": None, "ram_source": None, "ram_at": None}
 
     def poll(self, path, start) -> dict:
         """The state after the log's new lines; `start` is where the engine's current run began in it."""
@@ -715,6 +719,16 @@ class ConvCacheLog:
         for line in data[:end].decode("utf-8", "replace").splitlines():
             if "conversation cache:" not in line:
                 continue
+            m = self.RAM.search(line)                   # the guard's reading, on every line it decided with
+            if m:
+                avail, floor_mib = int(m.group(1)), int(m.group(2))
+                st = self.state
+                st["ram_at"] = now
+                # -1: the engine could not measure, and the floor belongs to a reading that never happened - so
+                # the whole figure stays unknown rather than half-known (the card then shows no blocked part)
+                st["ram_available_bytes"] = None if avail < 0 else avail * 1048576
+                st["ram_floor_bytes"] = None if avail < 0 else floor_mib * 1048576
+                st["ram_source"] = None if avail < 0 else m.group(3)
             m = self.EVENT.search(line)
             if m:
                 st = self.state
@@ -794,13 +808,33 @@ def conversation_slots(engine) -> int | None:
     return slots if isinstance(slots, int) else None
 
 
+def conversation_budget_parts(parked: dict, budget_bytes: int | None) -> dict:
+    """The conversation cache's budget split the way the Monitor draws it, left to right: used (what is parked
+    now), free (the room the RAM guard would still let fill) and blocked (the room it would not - the engine's own
+    last reading of the free RAM, less the `--conversation-cache-min-free-mib` floor it must keep beside a
+    snapshot, is how much more the budget could still take; whatever the budget offers beyond that is space no
+    conversation can use).  `blocked_bytes` is None until the engine has reported a reading: an engine without the
+    ram_* keys, or a run whose requests never reached the guard, and then the card shows no blocked part because a
+    figure that was never measured says nothing about the budget."""
+    used = int(parked.get("bytes") or 0)
+    left = max(0, int(budget_bytes) - used) if isinstance(budget_bytes, int) and budget_bytes > 0 else 0
+    avail, floor = parked.get("ram_available_bytes"), parked.get("ram_floor_bytes")
+    known = isinstance(avail, int) and isinstance(floor, int)
+    free = min(left, max(0, avail - floor)) if known else left
+    return {"budget_bytes": budget_bytes, "used_bytes": used, "free_bytes": free,
+            "blocked_bytes": (left - free) if known else None,
+            "ram_available_bytes": avail, "ram_floor_bytes": floor, "ram_source": parked.get("ram_source"),
+            "ram_at": parked.get("ram_at")}
+
+
 def conversation_cache_view(info: dict, hist: list, totals: dict, parked: dict) -> dict:
     """#596: the Monitor's Conversation cache card: the parked conversations (the engine's opt-in
     --conversation-cache-mib: budget, slots, what its log says) and how much of the prompts the cache gave back."""
     mib = info.get("conversation_cache_mib")
+    budget = mib * 1048576 if isinstance(mib, int) and mib > 0 else None
     last = hist[-1] if hist else None
     return {"enabled": isinstance(mib, int) and mib > 0, "budget_mib": mib if isinstance(mib, int) else None,
-            "slots": info.get("conversation_cache_slots"), **parked,
+            "slots": info.get("conversation_cache_slots"), **parked, **conversation_budget_parts(parked, budget),
             "requests": len(hist), "requests_reused": sum(1 for r in hist if (r.get("reused") or 0) > 0),
             "reused_tokens": totals.get("reused", 0), "prompt_tokens": totals.get("prompt_tokens", 0),
             "last_reused": last.get("reused") if last else None,

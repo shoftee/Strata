@@ -1109,7 +1109,9 @@ remains INT8, as in upstream. Windows/HIP and multi-GPU runtime coverage must be
 reported separately from Linux/CUDA evidence.
 
 The web page's Monitor tab has a **Conversation cache** card (0.1.39, #596): the parked conversations against the
-slots and the RAM budget, how many were parked, restored and evicted, and the last switch (read from the engine's
+slots and the RAM budget - what is parked, what the engine could still park, and the part of the budget its own RAM
+measurement says it cannot fill (the red segment at the right end of the bar, hover or tab to it for the figures
+behind it) - how many were parked, restored and evicted, and the last switch (read from the engine's
 log), and for every setup how many prompt tokens the cache gave back - in the last request and since the start.
 `/metrics` has the same under `"conversation_cache"`.
 
@@ -1169,6 +1171,17 @@ case the loop still handles. Unknown telemetry refuses without evicting: it admi
 much RAM comes back. `conversation_cache_test` checks that the byte figure counts exactly what
 `evict_oldest()` can release (a pinned prefix and the guarded donor stay out of it),
 `conversation_memory_test` the comparison itself; both are CPU only, no model.
+
+Every conversation-cache line this gate decides with carries the reading that decided it, twice: in the sentence a
+person greps for, and as machine-readable `ram_available_mib=N ram_floor_mib=N ram_source=name` at the end of the line
+(`-1` and `none` when it could not measure). The Monitor's card reads the keys and paints the consequence: with 6,643
+MiB free, a 1,024 MiB floor and a 12,288 MiB budget holding 2,304 MiB, the host can take 5,619 MiB more and the
+budget's other 4,365 MiB is space no conversation can use until RAM frees up - so the bar shows used, then free, then
+that unusable part in red, and the label beside it names it. The keys are on the log line rather than in a polled
+engine command because the server cannot ask the engine for this figure between requests: the line a decision produced
+is where the number lives, and it is always the number that decision used. An engine without the keys fills no red
+segment - a figure that was never measured says nothing about the budget - and a line reporting `-1` clears the
+reading instead of treating unknown telemetry as "no room".
 
 **The RAM figure (`available_host_bytes()`).** The headroom is the smallest of three
 numbers, sampled each time it is asked and not a reservation (other writers can take the

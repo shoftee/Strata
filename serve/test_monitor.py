@@ -203,6 +203,65 @@ class ConversationCacheCard(unittest.TestCase):
     PARK = ("strata serve: conversation cache: parked 5000 tokens in 12.0 ms; parked=1 bytes=104857600 evictions=0 "
             "snapshot_bytes=104857600 reused_kv_bytes=0\n")
     RESTORE = "strata serve: conversation cache: restored 4000 tokens (exact) in 30.0 ms; parked=2 bytes=209715200\n"
+    # engine 0.1.46+ puts the guard's own reading on the line it decided with, in machine-readable keys
+    PARK_RAM = ("strata serve: conversation cache: parked 116000 tokens in 90.0 ms; parked=2 bytes=2413748224 "
+                "evictions=3 snapshot_bytes=2413748224 reused_kv_bytes=0; ram_available_mib=6643 ram_floor_mib=1024 "
+                "ram_source=cgroup\n")
+    REFUSED = ("strata serve: conversation cache: skip parking (physical RAM admission; need 3870 MiB plus 1024 MiB "
+               "floor, 6643 MiB available, source cgroup; evicting all 2 parked conversations (2304 MiB) would not be "
+               "enough, keeping them all; ram_available_mib=6643 ram_floor_mib=1024 ram_source=cgroup)\n")
+    UNKNOWN = ("strata serve: conversation cache: skip parking (physical RAM admission; need 3870 MiB plus 1024 MiB "
+               "floor, RAM telemetry unavailable; evicting all 0 parked conversations (0 MiB) would not be enough, "
+               "keeping them all; ram_available_mib=-1 ram_floor_mib=1024 ram_source=none)\n")
+
+    def test_the_ram_guard_reading(self):
+        from serve.server import ConvCacheLog
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "strata.log"
+            log.write_text("", encoding="utf-8")
+            c = ConvCacheLog()
+            self.assertIsNone(c.poll(str(log), 0)["ram_available_bytes"])     # nothing has been measured yet
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(self.PARK)                                            # an engine without the keys
+            st = c.poll(str(log), 0)
+            self.assertEqual((st["parked"], st["ram_available_bytes"]), (1, None))   # the card shows no red part
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(self.REFUSED)
+            st = c.poll(str(log), 0)
+            self.assertEqual((st["ram_available_bytes"], st["ram_floor_bytes"], st["ram_source"]),
+                             (6643 * 1048576, 1024 * 1048576, "cgroup"))
+            self.assertIsNotNone(st["ram_at"])
+            self.assertEqual(st["parked"], 1)                             # a refusal evicted nothing and parked nothing
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(self.PARK_RAM)
+            self.assertEqual(c.poll(str(log), 0)["bytes"], 2413748224)     # the park's own keys stay the freshest
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(self.UNKNOWN)
+            st = c.poll(str(log), 0)                                       # -1 is "could not measure", not "no room"
+            self.assertIsNone(st["ram_available_bytes"])
+            self.assertIsNone(st["ram_floor_bytes"])
+            self.assertIsNone(st["ram_source"])
+
+    def test_the_budget_split(self):
+        from serve.server import conversation_budget_parts
+        MiB = 1048576
+        parked = {"bytes": 2304 * MiB}                               # --conversation-cache-mib 12288, 2304 MiB in
+        p = conversation_budget_parts(parked, 12288 * MiB)
+        self.assertEqual((p["used_bytes"], p["free_bytes"], p["blocked_bytes"]),
+                         (2304 * MiB, 9984 * MiB, None))                    # never measured: no unusable part
+        parked.update(ram_available_bytes=6643 * MiB, ram_floor_bytes=1024 * MiB)
+        p = conversation_budget_parts(parked, 12288 * MiB)
+        self.assertEqual((p["free_bytes"], p["blocked_bytes"]), (5619 * MiB, 4365 * MiB))   # 6643 - 1024 fits, the rest cannot
+        self.assertEqual(p["used_bytes"] + p["free_bytes"] + p["blocked_bytes"], 12288 * MiB)
+        parked.update(ram_available_bytes=20000 * MiB)                      # more RAM free than the budget
+        self.assertEqual(conversation_budget_parts(parked, 12288 * MiB)["blocked_bytes"], 0)
+        parked.update(ram_available_bytes=900 * MiB)                        # under the floor: nothing may grow
+        p = conversation_budget_parts(parked, 12288 * MiB)
+        self.assertEqual((p["free_bytes"], p["blocked_bytes"]), (0, 9984 * MiB))
+        parked.update(bytes=12288 * MiB)                                    # a full cache has no left to block
+        p = conversation_budget_parts(parked, 12288 * MiB)
+        self.assertEqual((p["used_bytes"], p["free_bytes"], p["blocked_bytes"]), (12288 * MiB, 0, 0))
 
     def test_the_log(self):
         from serve.server import ConvCacheLog
@@ -236,6 +295,8 @@ class ConversationCacheCard(unittest.TestCase):
                 c = json.loads(r.read())["conversation_cache"]
             self.assertEqual((c["enabled"], c["budget_mib"], c["slots"], c["parked"], c["requests"]),
                              (True, 8192, 4, 0, 0))
+            self.assertEqual((c["used_bytes"], c["free_bytes"], c["blocked_bytes"]),
+                             (0, 8192 * 1048576, None))     # nothing parked and nothing measured: no unusable part
             req = urllib.request.Request(base + "/v1/chat/completions", headers={"Content-Type": "application/json"},
                                          data=json.dumps({"messages": [{"role": "user", "content": "hi"}]}).encode())
             with urllib.request.urlopen(req, timeout=10) as r:
@@ -257,6 +318,25 @@ class ConversationCacheCard(unittest.TestCase):
         for el in ("cc-card", "cc-slots-text", "cc-mem-text", "cc-facts", "cc-note"):
             self.assertIn(f'id="{el}"', html)
             self.assertIn(f'"{el}"', js)
+
+    def test_the_budget_bar_draws_used_free_and_the_unusable_part_in_that_order(self):
+        """The RAM bar is three segments, left to right: what is parked, what the engine could still park, and the
+        red part at the end that its own measurement says it cannot fill."""
+        web = Path(__file__).parent / "web"
+        html, js = (web / "index.html").read_text(encoding="utf-8"), (web / "app.js").read_text(encoding="utf-8")
+        self.assertIn('<div class="st-progress st-progress--stacked">', html)
+        for el in ("cc-mem-bar", "cc-mem-free", "cc-mem-block"):
+            self.assertIn(f'id="{el}"', html)
+        # used, then the free track, then the blocked segment: the order they are drawn in is the markup's order
+        bar, free, block = (html.index('id="cc-mem-bar"'), html.index('id="cc-mem-free"'), html.index('id="cc-mem-block"'))
+        self.assertTrue(bar < free < block)
+        self.assertIn('$("cc-mem-block")', js)
+        self.assertIn("seg.style.width = pct(blocked, budget)", js)
+        self.assertIn("Budget the RAM guard blocks", js)          # the tooltip that explains the red
+        css = (web / "components.css").read_text(encoding="utf-8")
+        self.assertIn(".st-progress--stacked{display:flex}", css)
+        self.assertIn(".st-progress__block", css)
+        self.assertIn("var(--st-danger)", css)
 
 
 class MemoryBreakdown(unittest.TestCase):
