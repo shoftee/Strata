@@ -111,7 +111,11 @@ class Monitor(unittest.TestCase):
                         self.assertNotIn("response", record)
 
     def test_error_and_engine_death_are_not_successes(self):
+        # a request the server refuses is an error record: the strict mode (fit_max_tokens off) refuses a max_tokens
+        # that overshoots the context, the default shortens it (serve/test_server.py MaxTokens)
+        self.svc.fit_max_tokens = False
         self.assertEqual(self.chat(max_tokens=20000)[0], 400)
+        self.svc.fit_max_tokens = True
         self.assertEqual(self.latest()["state"], "error")
         for api in ("openai", "anthropic"):
             for stream in (False, True):
@@ -337,6 +341,20 @@ class ConversationCacheCard(unittest.TestCase):
         self.assertIn(".st-progress--stacked{display:flex}", css)
         self.assertIn(".st-progress__block", css)
         self.assertIn("var(--st-danger)", css)
+
+    def test_the_slot_cards_use_the_engine_word_for_a_running_slot(self):
+        """A running slot is "decoding" in the payload and the cards say the same: upstream's Terminal counts,
+        colours and filters slots by that string, so the page must not quietly rename it.  The "generating" the page
+        does keep is `live.state`'s, the server's own word for the one request it follows."""
+        web = Path(__file__).parent / "web"
+        html, js = (web / "index.html").read_text(encoding="utf-8"), (web / "app.js").read_text(encoding="utf-8")
+        self.assertIn('data-s="decoding"', html)
+        self.assertIn('s.state === "decoding"', js)
+        self.assertIn('name = {reading: "Reading prompt", decoding: "Decoding", idle: "Idle"}', js)
+        self.assertIn('live.state === "generating"', js)
+        css = (web / "components.css").read_text(encoding="utf-8")
+        self.assertIn('.st-pill[data-state="decoding"] .st-pill__dot', css)
+        self.assertIn(".st-badge--decoding", css)
 
 
 class MemoryBreakdown(unittest.TestCase):

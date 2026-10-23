@@ -14,7 +14,7 @@ const gb = (b, d = 1) => (b == null ? "–" : fmt(b / 1073741824, d));   // memo
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem("strata." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem("strata." + k, JSON.stringify(v)); } catch (e) { /* private mode: in memory only */ } },
+  set(k, v) { try { localStorage.setItem("strata." + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
 };
 
 // ------------------------------------------------------------------ toasts
@@ -87,15 +87,24 @@ for (const b of document.querySelectorAll(".st-tab")) b.onclick = () => showTab(
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
 // ------------------------------------------------------------------ server access
+let apiKey = store.get("apikey", "");
 function headers(json = false) {
   const h = {};
-  const key = store.get("apikey", "");
-  if (key) h.Authorization = "Bearer " + key;
+  if (apiKey) h.Authorization = "Bearer " + apiKey;
   if (json) h["Content-Type"] = "application/json";
   return h;
 }
-$("api-key").value = store.get("apikey", "");
-$("api-key").onchange = () => { store.set("apikey", $("api-key").value.trim()); toast("success", "API key saved", "Kept in this browser only."); };
+$("api-key").value = apiKey;
+function saveApiKey(notify = false) {
+  apiKey = $("api-key").value.trim();                // usable even when browser storage is blocked or full
+  const saved = store.set("apikey", apiKey);
+  if (notify) {
+    if (saved) toast("success", "API key saved", "Kept in this browser only.");
+    else toast("warn", "API key used for this page only", "Browser storage is unavailable. Enter it again after reloading.");
+  }
+}
+$("api-key").oninput = () => saveApiKey();
+$("api-key").onchange = () => saveApiKey(true);
 
 let health = {model: "strata", images: false, max_context: 0};
 async function loadHealth() {
@@ -193,7 +202,7 @@ function renderPills(live, multi) {
   if (multi) {
     const pills = (live.slots || []).filter((s) => s.state !== "idle").map((s) => s.state === "reading"
       ? pillHtml("reading", `Reading prompt${s.prompt_tokens ? ` · ${Math.round((100 * (s.prompt_read || 0)) / s.prompt_tokens)}%` : ""}`)
-      : pillHtml("generating", `${s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "Generating"}${s.tok_s ? ` · ${fmt(s.tok_s, 1)} tok/s` : ""}`));
+      : pillHtml("decoding", `${s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "Decoding"}${s.tok_s ? ` · ${fmt(s.tok_s, 1)} tok/s` : ""}`));
     if (live.queued > 0) pills.push(pillHtml("queued", `${live.queued} queued`));
     $("pills").innerHTML = pills.join("") || pillHtml("idle", "Idle");
     return;
@@ -205,7 +214,7 @@ function renderPills(live, multi) {
     const pct = s.prompt_tokens ? Math.round((100 * (s.prompt_read || 0)) / s.prompt_tokens) : null;
     setPill("reading", pct != null ? `Reading prompt · ${pct}%` : "Reading prompt");
   } else {
-    setPill("generating", `Generating · ${fmt(s.tok_s, 1)} tok/s`);
+    setPill("decoding", `Decoding · ${fmt(s.tok_s, 1)} tok/s`);
   }
   if (live.queued > 0) setPill("queued", `${live.queued} queued`);
 }
@@ -426,7 +435,7 @@ function renderCtxSlots(live, eng, mem) {
   if (tipHover) return;
   const ctx = eng.max_context || 0;
   const kv = {}; (mem && mem.slots || []).forEach((s) => { kv[s.slot] = s; });
-  const color = {reading: "var(--st-info)", generating: "var(--st-accent)"};
+  const color = {reading: "var(--st-info)", decoding: "var(--st-accent)"};
   $("ctx-slots").innerHTML = (live.slots || []).map((s) => {
     const used = s.state === "idle" ? (s.context_tokens || s.held_tokens || 0) : (s.prompt_tokens || 0) + (s.generated || 0);
     const frac = ctx ? Math.min(1, used / ctx) : 0;
@@ -444,14 +453,14 @@ function renderCtxSlots(live, eng, mem) {
 // the running slots' state, one row each, when several requests run together
 function renderStateSlots(live) {
   if (tipHover) return;
-  const name = {reading: "Reading prompt", generating: "Generating", idle: "Idle"};
+  const name = {reading: "Reading prompt", decoding: "Decoding", idle: "Idle"};
   $("state-slots").innerHTML = (live.slots || []).map((s) => {
     const active = s.state !== "idle";
-    const label = s.state === "generating" && s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : (name[s.state] || s.state);
+    const label = s.state === "decoding" && s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : (name[s.state] || s.state);
     const reading = s.state === "reading" && s.prompt_tokens ? Math.min(100, (100 * (s.prompt_read || 0)) / s.prompt_tokens) : null;
-    const pct = s.state === "generating" && s.max_tokens ? Math.min(100, (100 * (s.generated || 0)) / s.max_tokens)
+    const pct = s.state === "decoding" && s.max_tokens ? Math.min(100, (100 * (s.generated || 0)) / s.max_tokens)
       : reading != null ? reading : (active ? 100 : 0);
-    const detail = s.state === "generating" ? `${fmt(s.generated || 0)} tok${s.tok_s ? ` · ${fmt(s.tok_s, 1)} t/s` : ""}`
+    const detail = s.state === "decoding" ? `${fmt(s.generated || 0)} tok${s.tok_s ? ` · ${fmt(s.tok_s, 1)} t/s` : ""}`
       : reading != null ? `${fmt(s.prompt_read || 0)} / ${fmt(s.prompt_tokens)} tok`
       : active ? `${fmt(s.prompt_tokens || 0)} tok`
       : `${fmt(s.context_tokens || s.held_tokens || 0)} tok`;
@@ -484,8 +493,8 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, mem, 
       } else {
         detail = `${fmt(s.prompt_tokens || 0)} tokens`;
       }
-    } else if (s && s.state === "generating") {
-      label = s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "Generating";
+    } else if (s && s.state === "decoding") {
+      label = s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "Decoding";
       delete prog.dataset.tone;
       pct = s.max_tokens ? Math.min(100, (100 * (s.generated || 0)) / s.max_tokens) : 0;
       detail = `${fmt(s.generated || 0)} tokens · ${fmt(s.tok_s, 1)} tok/s`;

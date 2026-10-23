@@ -16,7 +16,9 @@ a{color:var(--st-accent-text);text-decoration:none} a:hover{text-decoration:unde
 .st-pills{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:8px;container-type:inline-size;container-name:pills}
 .st-pill{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:var(--st-r-pill);border:1px solid var(--st-line);background:var(--st-surface-2);font-size:var(--st-fs-sm);font-weight:500;color:var(--st-ink-soft);font-variant-numeric:tabular-nums;white-space:nowrap}
 .st-pill__dot{width:8px;height:8px;border-radius:50%;background:var(--st-ink-muted)}
-.st-pill[data-state="generating"] .st-pill__dot{background:var(--st-accent);box-shadow:0 0 0 4px var(--st-accent-tint)}
+/* "decoding" is a batch slot's word for the same thing (slots_view), "generating" is the engine's word for the
+   request the page follows (live.state); the pill and the badge row use whichever the payload carries */
+.st-pill[data-state="generating"] .st-pill__dot,.st-pill[data-state="decoding"] .st-pill__dot{background:var(--st-accent);box-shadow:0 0 0 4px var(--st-accent-tint)}
 .st-pill[data-state="reading"] .st-pill__dot{background:var(--st-info);box-shadow:0 0 0 4px var(--st-info-tint)}
 .st-pill[data-state="queued"] .st-pill__dot{background:var(--st-warn)}
 /* collapse the pills to their dots when their own box gets too narrow, not when the viewport does */
@@ -62,7 +64,7 @@ a{color:var(--st-accent-text);text-decoration:none} a:hover{text-decoration:unde
 .st-badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--st-r-pill);font-size:var(--st-fs-xs);font-weight:700;background:var(--st-surface-2);color:var(--st-ink-muted);border:1px solid var(--st-line)}
 .st-badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
 .st-badge--reading{background:var(--st-info-tint);color:var(--st-info-text);border-color:transparent}
-.st-badge--generating{background:var(--st-accent-tint);color:var(--st-accent-text);border-color:transparent}
+.st-badge--generating,.st-badge--decoding{background:var(--st-accent-tint);color:var(--st-accent-text);border-color:transparent}
 .st-badge--queued{background:var(--st-warn-tint);color:var(--st-warn-text);border-color:transparent}
 .st-badge--error{background:var(--st-danger-tint);color:var(--st-danger-text);border-color:transparent}
 
