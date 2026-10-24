@@ -625,12 +625,16 @@ void test_host_memory() {
     };
     // no cgroup line at all: MemAvailable alone (before #633: "cannot determine")
     require(probe("") && m.available == 100 * GiB && m.cgroup_limit == ~0ull, "no cgroup: MemAvailable alone");
+    require(m.mem_available == 100 * GiB, "mem_available is the physical figure with no cgroup");
     // v2, a 48 GiB limit with 16 GiB charged, 4 GiB of it clean cache
     put("fs/cgroup.controllers", "memory\n");
     put("fs/box/memory.max", std::to_string(48 * GiB) + "\n");
     put("fs/box/memory.current", std::to_string(16 * GiB) + "\n");
     put("fs/box/memory.stat", "inactive_file " + std::to_string(4 * GiB) + "\nfile_dirty 0\nfile_writeback 0\n");
     require(probe("0::/box\n") && m.available == 36 * GiB - 48 * GiB / 64 && m.cgroup_limit == 48 * GiB, "v2 limit");
+    // the two budgets differ on purpose: `available` is what HOST allocations may use, `mem_available` is what a GPU
+    // allocation (which memcg does not charge) may use - the cgroup cap must not shrink it
+    require(m.mem_available == 100 * GiB, "mem_available stayed physical under the cgroup cap");
     // 149: with "file" (active + inactive cache) the active part counts too: 12 GiB of cache, 4 GiB anonymous
     put("fs/box/memory.stat", "file " + std::to_string(12 * GiB) + "\ninactive_file " + std::to_string(4 * GiB) +
                               "\nfile_dirty 0\nfile_writeback 0\n");

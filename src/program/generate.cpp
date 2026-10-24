@@ -6100,13 +6100,24 @@ int main(int argc, char** argv) {
             if (cudaGetDevice(&ud) == cudaSuccess && cudaGetDeviceProperties(&up, ud) == cudaSuccess && up.integrated &&
                 strata::core::detail::host_available_memory(uh)) {
                 const uint64_t reserve = strata::core::uma_desktop_reserve_bytes(strata::platform::total_physical_memory());
-                const uint64_t room = strata::core::uma_cache_room_bytes((uint64_t) uh.available, reserve);
+                // The cache is a GPU allocation, and on an APU those GTT pages are allocated inside the driver, so this
+                // process's cgroup is never charged for them: the cgroup-clamped `uh.available` is the budget for HOST
+                // allocations and is the wrong figure here (a cap set low to leave room for the GPU half would then
+                // read as "no room for a cache").  `uh.mem_available` is the RAM the OS reports available, which
+                // already counts the GPU's share as used, so the cache is sized from it and the reserve is taken off
+                // that.  STRATA_UMA_RESERVE_GIB=0 keeps the old sizing; --expert-cache N sets the cache by hand.
+                const uint64_t host_ram = uh.mem_available != 0 ? (uint64_t) uh.mem_available : (uint64_t) uh.available;
+                const uint64_t room = strata::core::uma_cache_room_bytes(host_ram, reserve);
                 if (reserve > 0 && room < (uint64_t) free_b) {
                     std::fprintf(stderr, "strata generate: expert cache auto: this GPU shares system RAM: %.2f GiB free on the GPU, but the OS has "
                                          "%.2f GiB available; %.2f GiB stay for the desktop, so the cache is sized from %.2f GiB "
                                          "(STRATA_UMA_RESERVE_GIB changes the reserve, --expert-cache N sets the cache)\n",
-                                 (double) free_b / 1073741824.0, (double) uh.available / 1073741824.0,
+                                 (double) free_b / 1073741824.0, (double) host_ram / 1073741824.0,
                                  (double) reserve / 1073741824.0, (double) room / 1073741824.0);
+                    if ((uint64_t) uh.available < host_ram)
+                        std::fprintf(stderr, "strata generate: expert cache auto: this cgroup's own cap leaves %.2f GiB, which is not "
+                                             "used here: the GPU's memory is not charged to the cgroup\n",
+                                     (double) uh.available / 1073741824.0);
                     free_b = (size_t) room;
                 }
             } else {
@@ -6206,12 +6217,14 @@ int main(int argc, char** argv) {
             if (cudaGetDevice(&apu_dev) == cudaSuccess && cudaGetDeviceProperties(&apu_prop, apu_dev) == cudaSuccess &&
                 apu_prop.integrated && strata::core::detail::host_available_memory(hm)) {
                 const int64_t host_headroom = (int64_t) strata::core::uma_desktop_reserve_bytes(strata::platform::total_physical_memory());   // the OS, the desktop and request-time CPU work
+                const uint64_t host_ram = hm.mem_available != 0 ? (uint64_t) hm.mem_available : (uint64_t) hm.available;
                 const int64_t cache_b = (int64_t) o.expert_cache * blob;
-                if (cache_b > (int64_t) hm.available - host_headroom)
+                if (cache_b > (int64_t) host_ram - host_headroom)
                     std::fprintf(stderr, "strata generate: WARNING: this GPU shares system RAM, and the cache above (%.2f GiB) is "
-                                         "more than the host memory available now (%.2f GiB) less 4 GiB for the OS: the system may "
+                                         "more than the host memory available now (%.2f GiB) less %.2f GiB for the desktop: the system may "
                                          "run out of memory; --expert-cache N sets the cache by hand\n",
-                                 (double) cache_b / 1073741824.0, (double) hm.available / 1073741824.0);
+                                 (double) cache_b / 1073741824.0, (double) host_ram / 1073741824.0,
+                                 (double) host_headroom / 1073741824.0);
             }
         }
 #endif

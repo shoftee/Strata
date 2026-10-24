@@ -362,6 +362,7 @@ bool host_available_memory(HostMemory& m, const std::string& meminfo, const std:
     status.dwLength = sizeof(status);
     if (!GlobalMemoryStatusEx(&status)) return false;
     m.available = (uint64_t) status.ullAvailPhys;
+    m.mem_available = m.available;
     m.commit = (uint64_t) status.ullAvailPageFile;
     return m.available > 0;
 #elif defined(__linux__)
@@ -377,6 +378,7 @@ bool host_available_memory(HostMemory& m, const std::string& meminfo, const std:
             value <= std::numeric_limits<uint64_t>::max() / 1024) bytes = value * 1024;
     }
     if (bytes == 0) return false;
+    m.mem_available = bytes;   // the physical figure, before the cgroup clamp below: for allocations memcg does not charge
     // Account for the tightest cgroup ancestor limit when its normal mount is visible.
     // This is a point-in-time guard, not a reservation against concurrent allocations.
     std::ifstream groups(self_cgroup);

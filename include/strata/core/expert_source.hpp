@@ -82,6 +82,10 @@ bool cgroup_available_bytes(uint64_t limit, const CgroupMemoryStat& stat, uint64
 /// and its ancestors, or v1 memory.limit_in_bytes), ~0 when there is none - what a container can never exceed.
 struct HostMemory {
     uint64_t available = 0;
+    /// MemAvailable alone, before any cgroup cap: what an allocation the cgroup is NOT charged for may use.  A GPU
+    /// cache on an APU is such an allocation - the GTT pages are allocated inside the driver, so memcg never charges
+    /// them - and MemAvailable already counts them as used RAM, so this figure is the honest budget for one.
+    uint64_t mem_available = 0;
     uint64_t cgroup_limit = ~uint64_t{0};
     uint64_t commit = ~uint64_t{0};   ///< available Windows commit capacity; ~0 when not reported
 };
