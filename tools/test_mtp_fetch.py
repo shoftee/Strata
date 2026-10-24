@@ -281,7 +281,7 @@ class Setup(unittest.TestCase):
 
 
 class Progress(FetchCase):
-    """#3257: the fetch says how far it is in the form of setup's own download line, so the app can show it."""
+    """#3257: the fetch says how far it is in the form of setup's own download line, so one reader follows both."""
 
     def test_progress_lines_name_the_whole_download_and_end_at_100(self):
         err = self.fetch(Mirror())
@@ -291,19 +291,13 @@ class Progress(FetchCase):
         self.assertIn("/ %.2f GB" % (total / 1e9), lines[-1])
         self.assertIn("(100%)", lines[-1])
         import re
-        for x in lines:                                  # the shape tools/strata_mcp.py install_progress reads
+        for x in lines:                                  # the shape of a setup download line
             self.assertTrue(re.match(r"\s*(\S.*?): +([\d.]+) / ([\d.]+) GB \((\d+)%\)", x), x)
 
     def test_a_resumed_fetch_starts_from_what_is_already_there(self):
         self.fetch(Mirror())
         err = self.fetch(Mirror())
         self.assertIn("(100%)", [x for x in err.splitlines() if "MTP draft layer:" in x][0])
-
-    def test_the_progress_figure_follows_the_job_in_strata_mcp(self):
-        import strata_mcp as MCP
-        got = MCP.install_progress(["=== Step 6: preparing the model for Strata ===",
-                                    "  MTP draft layer:   1.23 / 5.04 GB (24%)"])
-        self.assertEqual(got["download"], {"file": "MTP draft layer", "done_gb": 1.23, "total_gb": 5.04, "percent": 24})
 
 
 class Flaky(FetchCase):

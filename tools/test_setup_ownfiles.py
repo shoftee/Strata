@@ -66,7 +66,7 @@ class OwnFileChecks(unittest.TestCase):
 
 class CheckingShowsItsProgress(unittest.TestCase):
     def test_a_big_file_is_hashed_with_a_progress_line_of_its_own(self):
-        """Hashing a 60 GB shard takes minutes: the app and the Terminal show it as 'checking', with a figure (not a download stuck at 99%)."""
+        """Hashing a 60 GB shard takes minutes: the page shows it as 'checking', with a figure (not a download stuck at 99%)."""
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "big-00001-of-00002.gguf"
             size = (1 << 30) + 4096

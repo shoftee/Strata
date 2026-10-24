@@ -1,4 +1,9 @@
 **0.2.1: a task board in the app, pictures on the Mac and on Intel Arc cards, `strata bench run` with a fixed standard benchmark, faster downloads, Docker images, and your own engine settings are no longer overwritten.** It also fixes the crashes, stuck downloads and GPU-choice bugs reported on 0.2.0-beta. Each new default below says what it was measured on and whether the answers are identical to 0.2.0. The engine packages are version 0.1.46 (0.2.0 had 0.1.45.3) and the update feed has sequence number 102. Update with `strata update` (Terminal), Settings > Update (app), or `UPDATE.bat` / `./update.sh` (source installs).
+> **A note on this history.** These are the release notes as they were written for 0.2. This copy of Strata has
+> no desktop app, no `strata` command and no Docker images: anything below about those - a `.dmg`, the app's
+> Settings, `strata launch`, a Terminal archive - describes what this tree does not ship. The engine, the server,
+> the installer and the model work as described.
+
 
 ## Which file to download
 

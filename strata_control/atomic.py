@@ -1,6 +1,7 @@
 """Replace a file that another program may be reading, on Windows as well as everywhere else.
 
-A job record (a Time-skip `run.json`, a tuning `job.json`) is rewritten at every phase and READ by the app's host every couple of seconds.
+A job record (a Time-skip `run.json`, a tuning `job.json`) is rewritten at every phase and READ every couple of seconds
+by the program that watches the job.
 On Windows, `os.replace` onto a file that is open in another process fails with PermissionError ("Access is denied") for as long as the
 reader holds it. That is a split second, but a job saves many times, so a Time-skip or a tune died at random with that error. The fix is
 to wait that split second and try again; any other error, and a PermissionError that does not go away, is raised as before.

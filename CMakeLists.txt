@@ -170,7 +170,7 @@ elseif(STRATA_ENABLE_CUDA)
   # #585: CMake links CUDA code with the STATIC runtime by default, and the targets below also link CUDA::cudart (the
   # DLL's import library).  MSVC with a CUDA 12.x toolkit - the experimental Pascal/Volta build - then fails with
   # LNK1169 (every cudart symbol defined twice); GNU ld lets it pass.  That build links the shared runtime alone.  The
-  # ready-made engine (CUDA 13, no STRATA_EXPERIMENTAL_SM60) is unchanged; -DCMAKE_CUDA_RUNTIME_LIBRARY overrides.
+  # the normal engine (CUDA 13, no STRATA_EXPERIMENTAL_SM60) is unchanged; -DCMAKE_CUDA_RUNTIME_LIBRARY overrides.
   if(MSVC AND STRATA_EXPERIMENTAL_SM60 AND NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
     set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
   endif()
@@ -194,7 +194,7 @@ elseif(STRATA_ENABLE_CUDA)
     # These sit below every architecture the kernels were written for, so two intrinsics are replaced below
     # their arch - `__dp4a` (6.1+) and `__nanosleep` (7.0+) - in include/strata/kernels/dp4a.hpp, which is
     # bit-exact for the first and merely a shorter pause for the second (sm_70 has both).  Community-tested,
-    # not in the ready-made engine; RTX 20/30/40/50 cards must use the release engine instead.  It needs a CUDA
+    # not in the normal engine build; RTX 20/30/40/50 cards use that build as it is.  It needs a CUDA
     # 12.x toolkit: CUDA 13 dropped sm_60 and sm_70 (nvcc fails CMake's compiler test with "compute_70").
     if(_base LESS 75 AND NOT STRATA_EXPERIMENTAL_SM60)
       message(FATAL_ERROR
@@ -214,7 +214,7 @@ elseif(STRATA_ENABLE_CUDA)
   endforeach()
   if(STRATA_EXPERIMENTAL_SM60)
     # every target sees it: the Pascal / Volta code paths (the Volta prompt attention, PR #600) are compiled into this
-    # build only, so the ready-made engine (sm_75+) keeps exactly the code it had
+    # build only, so the normal engine build (sm_75+) keeps exactly the code it had
     add_compile_definitions(STRATA_EXPERIMENTAL_SM60=1)
   endif()
   message(STATUS "Strata: CUDA enabled, arch ${CMAKE_CUDA_ARCHITECTURES}")

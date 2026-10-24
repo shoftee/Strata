@@ -1,4 +1,4 @@
-"""docs/media/make_figures.py - the README's "How does it work?" illustrations, in the Strata app's style: its colors
+"""docs/media/make_figures.py - the README's "How does it work?" illustrations, in the Strata web page's style: its colors
 (serve/web/tokens.css), its icons (serve/web/sprite.svg) and its font (Outfit, embedded, SIL OFL 1.1).  Light and dark
 follow the reader's system setting.
 
@@ -14,7 +14,7 @@ OUT = ROOT / "docs" / "media"
 SPRITE = (ROOT / "serve" / "web" / "sprite.svg").read_text(encoding="utf-8")
 FONT = base64.b64encode((ROOT / "serve" / "web" / "fonts" / "outfit-latin-wght.woff2").read_bytes()).decode()
 
-# the app's tokens (light, then dark)
+# the web page's tokens (light, then dark)
 CSS = """
 @font-face{font-family:"Outfit";src:url(data:font/woff2;base64,%s) format("woff2");font-weight:100 900}
 text{font-family:"Outfit",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:#221e1f}

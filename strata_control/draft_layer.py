@@ -1,7 +1,7 @@
 """The draft layer (MTP) switch of a model's run config.
 
 ``"mtp": false`` in a model's run config (strata-<model>.json) starts the engine without the draft layer.  The key is the
-person's: setup keeps it when it writes the file again (setup.carry_over), the app's Models settings and `strata launch --mtp off`
+person's: setup keeps it when it writes the file again (setup.carry_over), the page's Settings view and ``--mtp off``
 write it, and every start applies it (serve/server.py engine_args), so a setup run that puts ``--mtp <folder>`` back into
 the engine arguments cannot bring the draft layer back.
 

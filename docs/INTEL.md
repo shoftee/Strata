@@ -821,8 +821,8 @@ the card from 24 GB. `strata_control/vision_reader.py` is the one place for it. 
   flip once one has. **B-series cards are supported and untested by us** (the owner decision of 2026-10-22: users will report failures). One known
   risk: the first picture on the Arc Pro B70 (engine 0.1.45, IQ3_S, 2026-10-19, CPU reader) logged an xe engine reset (ccs + bcs) and
   `Fault response: Unsuccessful -EINVAL`, and the request ended 503. The CPU reader was in use, so the fault is in the engine on xe, not in a GPU
-  reader; it has not been looked at since. It is not a refusal: setup and `strata launch` print one plain line that the card is new to Strata and
-  how to report a problem, and `--vision no` (setup) or `--vision off` (`strata launch`) turns pictures off.
+  reader; it has not been looked at since. It is not a refusal: setup prints one plain line that the card is new to Strata and
+  how to report a problem, and `--vision no` turns pictures off.
 
 Tested on the A750 (IQ3_XXS, 8K context, engine from f-021-int, JIT build, 2026-10-19): a picture with a red circle, a blue square and the
 words "STRATA 42", 8 variants, answered correctly by the CPU reader 10 of 10 (a first set with smaller text read "42" as "412"), and

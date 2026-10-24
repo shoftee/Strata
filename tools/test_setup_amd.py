@@ -362,7 +362,7 @@ class WindowsDetection(unittest.TestCase):
             self.assertEqual(setup.amd_gpus(), ["hip"])
 
     def test_probe_in_the_component_folder(self):
-        """#3418: the app keeps the engine in the component folder, not in control/engine; the cards must be numbered by the
+        """#3418: the engine probe can live in a component folder, not only beside the engine; the cards must be numbered by the
         HIP runtime there too (an iGPU on ordinal 0 made the display-order "GPU 0" the wrong card)."""
         from strata_control import engine_component as EC
         name = "strata-device.exe" if setup.WIN else "strata-device"
@@ -396,39 +396,6 @@ class WindowsDetection(unittest.TestCase):
             (eng / "strata-device.exe").write_text("x")
             (eng / "BUILD.json").write_text('{"backend": "cuda"}')     # an NVIDIA engine is never asked
             self.assertIsNone(setup.hip_devices(eng / "strata-device.exe"))
-
-    def test_prebuilt_hip_zip(self):
-        """get_prebuilt_hip: a published zip (here a local folder) is unpacked into engine/; one without code for the
-        card, or older than the first Windows HIP release, is refused."""
-        import json
-        import zipfile
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            pub = root / "pub"
-            pub.mkdir()
-
-            def publish(meta):
-                with zipfile.ZipFile(pub / setup.WIN_HIP_ASSET, "w") as z:
-                    z.writestr(setup.EXE, "engine")       # #975: "strata" on Linux
-                    z.writestr("strata-device.exe", "probe")
-                    z.writestr("rocm/bin/amdhip64_7.dll", "dll")
-                    z.writestr("BUILD.json", json.dumps(meta))
-            ver = ".".join(map(str, setup.WIN_HIP_MIN_ENGINE))
-            good = {"source": "prebuilt", "backend": "hip", "version": ver, "archs": ["gfx1100", "gfx1201"],
-                    "lib_dirs": ["rocm/bin"]}
-            with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "say", lambda *a, **k: None), \
-                    mock.patch.object(setup, "ok", lambda *a: None), mock.patch.object(setup, "warn", lambda *a: None):
-                publish({**good, "archs": ["gfx1100"]})
-                self.assertIsNone(setup.get_prebuilt_hip(str(pub) + "/", {"arch": "gfx1201"}))
-                publish({**good, "version": "0.1.30"})
-                self.assertIsNone(setup.get_prebuilt_hip(str(pub) + "/", {"arch": "gfx1201"}))
-                publish(good)
-                eng = setup.get_prebuilt_hip(str(pub) + "/", {"arch": "gfx1201"})
-                self.assertEqual(eng, root / "engine")
-                self.assertTrue((eng / "rocm" / "bin" / "amdhip64_7.dll").exists())
-                self.assertEqual(setup.hip_lib_dirs(eng), [eng / "rocm" / "bin"])
-                (pub / setup.WIN_HIP_ASSET).unlink()           # installed: kept, nothing downloaded again
-                self.assertEqual(setup.get_prebuilt_hip(str(pub) + "/", {"arch": "gfx1201"}), eng)
 
 
 _HIP_DEVICES = setup.hip_devices                      # the real parser, for the tests that mock setup.hip_devices
@@ -641,7 +608,7 @@ class DeviceAccess(unittest.TestCase):
 
 
 class EngineLaunchEnv(unittest.TestCase):
-    """#2372: every engine program setup runs gets the ready-made HIP engine's rocm/bin on PATH, or Windows shows a
+    """#2372: every engine program setup runs gets the AMD engine's rocm/bin on PATH, or Windows shows a
     "hipblas.dll not found" dialog per DLL and `strata --families` prints nothing (setup then said the engine does
     not run Qwen3.6)."""
 
@@ -698,8 +665,8 @@ class TdrPointer(unittest.TestCase):
     def test_setup_points_windows_gfx12_to_the_entry(self):
         src = Path(setup.__file__).read_text(encoding="utf-8")
         self.assertIn('WIN and str(gpu.get("arch") or "").startswith("gfx12")', src)
-        doc = (Path(setup.__file__).resolve().parent / "docs/TROUBLESHOOTING.md").read_text(encoding="utf-8")
-        self.assertIn("Windows AMD: the driver resets", doc)
+        doc = (Path(setup.__file__).resolve().parent / "docs/AMD_HIP.md").read_text(encoding="utf-8")
+        self.assertIn("Windows: the driver resets", doc)
         for env in ("STRATA_PF_STEP_SYNC", "STRATA_KV_HOST_DMA"):
             self.assertIn(env, doc)
             self.assertIn(env, (Path(setup.__file__).resolve().parent / "src/prefill/prefill.cpp").read_text(encoding="utf-8"))

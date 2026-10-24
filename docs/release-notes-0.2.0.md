@@ -1,4 +1,9 @@
 **0.2.0: Strata is now an app, a Terminal and an engine; installers that carry the engine; pictures on by default on NVIDIA and AMD cards; faster defaults for NVIDIA 12-16 GB cards, AMD RX 9000 / R9700 on Linux and Intel Arc.** Each new default below says whether the answers are identical to 0.1.45 (the identity gate) or change slightly, with the measured difference. Engine package version 0.1.45.3. Update with `strata update` (Terminal), Settings > Update (app), or `UPDATE.bat` / `./update.sh` (source installs).
+> **A note on this history.** These are the release notes as they were written for 0.2. This copy of Strata has
+> no desktop app, no `strata` command and no Docker images: anything below about those - a `.dmg`, the app's
+> Settings, `strata launch`, a Terminal archive - describes what this tree does not ship. The engine, the server,
+> the installer and the model work as described.
+
 
 ## Which file to download
 

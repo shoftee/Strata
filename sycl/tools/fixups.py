@@ -341,7 +341,7 @@ edit("include/strata/core/mtp.hpp", lambda s: s.replace(
     "    dpct::queue_ptr cs_ = &dpct::get_in_order_queue();\n",
     "    dpct::queue_ptr cs_ = nullptr;   // load() creates it; not the device's queue, which ~MtpDrafter would destroy\n"))
 
-# `strata --version` must print before any GPU is touched (the engine smoke test of `strata update` runs it, and a user outside the
+# `strata --version` must print before any GPU is touched (the release build runs it as the engine's smoke test, and a user outside the
 # `render` group has no usable device). Two things in dpct's helper headers looked up the SYCL devices before main:
 # 1. blas::descriptor's `static inline queue_ptr _saved_queue_ptr = &get_default_queue();` (an inline variable): the default is
 #    looked up in get_saved_queue() instead.
@@ -378,7 +378,7 @@ def version_flag(s):
     return s.replace("    std::setvbuf(stdout, nullptr, _IONBF, 0);\n#if (defined(STRATA_USE_HIP)",
                      "    std::setvbuf(stdout, nullptr, _IONBF, 0);\n"
                      "    // `strata --version` / `-V` (also `strata generate --version`): the version and nothing else, before any GPU is touched, as the CUDA\n"
-                     "    // and HIP engines have answered it. `strata update` runs it as the engine's smoke test, and the Intel package build runs it with\n"
+                     "    // and HIP engines have answered it. the release build runs it as the engine's smoke test, and the Intel package build runs it with\n"
                      "    // an empty environment.\n"
                      "    for (int i = 1; i < argc && i < 3; ++i) {\n"
                      "        if (std::strcmp(argv[i], \"--version\") == 0 || std::strcmp(argv[i], \"-V\") == 0) {\n"

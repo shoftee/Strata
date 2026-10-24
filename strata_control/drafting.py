@@ -1,7 +1,7 @@
-"""Which drafter a model uses to guess ahead: MTP, DFlash2 or none. One place, read by the Terminal and the app.
+"""Which drafter a model uses to guess ahead: MTP, DFlash2 or none. One place, read by setup and the server.
 
 The choice is the person's, and it is saved in the model's run config as ``"drafting"``: ``auto`` (the default), ``mtp``, ``dflash2`` or
-``off``. ``strata launch --drafting ...`` writes it, the app's Models screen writes it, and ``serve/server.py`` applies it at every start
+``off``. Setup writes it from ``--drafting``, the page's Settings view writes it, and ``serve/server.py`` applies it at every start
 (like ``"mtp": false``, strata_control/draft_layer.py), so a setup run that rewrites the engine arguments cannot undo it.
 
   mtp      the engine's default drafter, the model's own draft layer (no extra flags)
@@ -29,7 +29,7 @@ DRAFTERS = ("mtp", "dflash2", "off")
 #
 # "Suggest DFlash2 where the win is 100%": Auto picks DFlash2 only on a card class where it measured faster than the MTP on EVERY tested
 # prompt (``faster_everywhere``). A class goes here when it was measured; a row with ``faster_everywhere`` False is MTP whatever the average
-# says. Fill this in as measurements come in (and change nothing else: the Terminal and the app both read it, tests/terminal/test_drafting.py
+# says. Fill this in as measurements come in (and change nothing else: setup and the server both read it, and
 # checks that a DFlash2 row has the evidence).
 #
 # Evidence so far (phaseA-tests/notes-dflash2-p1.md, -p02.md, -ports.md; DFlash2 against MTP, tokens per second, same prompts and flags):
@@ -99,13 +99,13 @@ PACK_NAME = "qwen3.8-flash-next-dflash2.q8.pack"
 VRAM_GB = 1.2                # what the drafter needs in graphics memory (the engine's own estimate)
 FOLDER = "dflash2"           # under the model data folder, next to ``mtp``
 
-#: model families (strata launch --family) the drafter was trained for and measured on: Qwen3.8-Flash-Next and its Gyro build.
+#: model families (setup's ``--family``) the drafter was trained for and measured on: Qwen3.8-Flash-Next and its Gyro build.
 SUPPORTED_FAMILIES = ("qwen", "gyro")
 _SUPPORTED_NAME = re.compile(r"^qwen3\.8-flash-next(-gyro-[a-z0-9._-]+|-(q|iq|tq)\d[a-z0-9_.]*)?$", re.IGNORECASE)
 
 
 def supported_model(model_name: str | None = None, family: str | None = None) -> bool:
-    """DFlash2 is for Qwen3.8-Flash-Next only: by family when it is known (the Terminal), else by the run config's model name."""
+    """DFlash2 is for Qwen3.8-Flash-Next only: by the family the caller names, else by the run config's model name."""
     if family is not None:
         return family.lower() in SUPPORTED_FAMILIES
     return bool(model_name and _SUPPORTED_NAME.match(str(model_name)))
@@ -138,7 +138,7 @@ def normalize(value: Any) -> str:
     return text if text in MODES else DEFAULT_MODE
 
 
-#: Does the engine in this release run DFlash2 when it serves (the app and `strata launch`)? In f-023-int src/program/generate.cpp, `--draft dflash2`
+#: Does the engine in this release run DFlash2 when it serves? In f-023-int src/program/generate.cpp, `--draft dflash2`
 #: is "for one card and the CLI run (not --serve, --batch or a layer split)": a served model prints "--draft dflash2 is off: ... the MTP drafts
 #: instead". So today the choice cannot take effect when serving, and nothing is downloaded or packed for it (1.2 GB for no effect would be a bad
 #: surprise); the start says so ("Drafting: MTP (DFlash2 isn't available in this mode yet)"). Flip this when the engine serves it; everything
@@ -252,7 +252,7 @@ def fallback_note(log_text: str) -> str:
 
 
 def summary_line(decision: Decision, engine_note: str = "") -> str:
-    """The line the Terminal and the app show: what drafts."""
+    """The line the installer and the server show: what drafts."""
     if engine_note:
         return engine_note
     if decision.note:
@@ -278,7 +278,8 @@ def take_note() -> str:
 
 
 def engine_info(args: list[Any], log_text: str = "", note: str = "") -> dict[str, str]:
-    """The facts of one engine start for /metrics and the apps: ``drafting`` (mtp | dflash2 | off) and ``drafting_note`` (plain words, or "").
+    """The facts of one engine start for /metrics and the status pages: ``drafting`` (mtp | dflash2 | off) and
+    ``drafting_note`` (plain words, or "").
     The engine's own log wins over the choice: if it says it fell back, that is what ran."""
     items = [str(a) for a in args]
     asked_dflash2 = any(items[i] == "--draft" and i + 1 < len(items) and items[i + 1] == "dflash2" for i in range(len(items)))

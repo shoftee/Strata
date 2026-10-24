@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the Windows HIP engine as the ready-made zip setup.py downloads (strata-windows-x64-hip.zip).
+"""Package the Windows HIP engine as a zip to unpack into engine\\ (strata-windows-x64-hip.zip).
 
     python tools/hip/package_windows.py --build build-hip-win --rocm <rocm-sdk path --root> \\
         --archs "gfx1100;gfx1201" --rocm-version 10.2.0a20260930 --out dist

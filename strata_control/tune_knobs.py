@@ -5,7 +5,7 @@ below are that document's). The rules are tables, not code, so a new measurement
 candidate before it runs and a preset before it is applied.
 
 Rule 1 (6.6): a candidate is a **single-knob change of the user's own configuration**. It never starts at "the first
-value of every dimension" (that is how the old Terminal sweep put ``--expert-cache 0 --kv fp16 --spec-min-p 0.001`` in
+value of every dimension" (that is how the old tuning sweep put ``--expert-cache 0 --kv fp16 --spec-min-p 0.001`` in
 place of the user's settings). Rule 2: a value outside the bounds, or on the never list, is not tried. Rule 3: boolean
 flags are present or absent (``--kv-grow 0`` is an unknown argument).
 

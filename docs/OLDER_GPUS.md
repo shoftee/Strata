@@ -3,7 +3,7 @@
 Strata's supported cards are NVIDIA RTX 20 / 30 / 40 / 50 and the AMD cards in [AMD_HIP.md](AMD_HIP.md). The cards
 below run through **opt-in, experimental** paths that community members wrote and measured on their own machines. The
 maintainers have one of these cards, a Tesla P100, and test on it; they have none of the others: each path is
-compile-checked and unit-tested here, and the ready-made engines and their output stay exactly as they were. Numbers are
+compile-checked and unit-tested here, and the engine's default build and its output stay exactly as they were. Numbers are
 the reporters' own, on one machine each, unless the text says the maintainers measured them.
 
 ## Support matrix
@@ -12,10 +12,10 @@ the reporters' own, on one machine each, unless the text says the maintainers me
 
 | Cards | Compute capability | How it runs | What is different on it | Reported |
 | --- | --- | --- | --- | --- |
-| Tesla P100 | 6.0 | the CUDA 12 engine | `__dp4a` emulated (bit-exact); BF16 projections through fp32; opt-in: `STRATA_Q8_SM60=1` runs the Q8_0 dense projections and head on a GP100 kernel ([below](#pascal-gp100-a-q8_0-decode-kernel-opt-in)) | 2x P100, IQ3_S, engine 0.1.39: prompt 526-532 tok/s, decode 28-32 tok/s at 128K prompt tokens, 3 of 3 needle checks at 122K ([report](../bench/results/2026-10-06-community-2x-p100/README.md), #1157); PH402 (4 GP100 dies), IQ3_XXS: decode 28.3 -> 38.9 tok/s with `STRATA_Q8_SM60=1` and a Q8_0 dense shard |
+| Tesla P100 | 6.0 | the CUDA 12 engine | `__dp4a` emulated (bit-exact); BF16 projections through fp32; opt-in: `STRATA_Q8_SM60=1` runs the Q8_0 dense projections and head on a GP100 kernel ([below](#pascal-gp100-a-q8_0-decode-kernel-opt-in)) | 2x P100, IQ3_S, engine 0.1.39: prompt 526-532 tok/s, decode 28-32 tok/s at 128K prompt tokens, 3 of 3 needle checks at 122K ([#1157](https://github.com/Niko1221/Strata/pull/1157)); PH402 (4 GP100 dies), IQ3_XXS: decode 28.3 -> 38.9 tok/s with `STRATA_Q8_SM60=1` and a Q8_0 dense shard |
 | Tesla P40 / P4, GTX 10 series | 6.1 | the CUDA 12 engine | BF16 projections through fp32 (cuBLAS has no BF16 GEMM there, #395); the dense weights dequantized by a wide kernel, expert mode 8 and its own interleaved-matvec table; opt-in `STRATA_DENSE_F32=1`: the large dense GEMMs as `cublasSgemm` ([below](#tesla-p40-sm_61-what-was-measured-and-changed)) | P40, IQ3_S, engine 0.1.30: prompt 217-374 tok/s, decode 30-33 tok/s (#395); 0.1.43.1 with the sm_61 changes: prompt 255 tok/s at 565 tokens (was 205), decode 37-38 tok/s (was 34-35); with `STRATA_DENSE_F32=1` 464-474 tok/s at 7K tokens (was 360-432) |
 | Tesla V100, Titan V | 7.0 | the CUDA 12 engine | BF16 projections on the FP16 tensor cores (#655, #540); the prompt attention on `mma.m8n8k4` (#600); a leaner attention kernel (#540) | V100-PCIE-32GB, UD-IQ4_XS: prompt 1,123-1,251 tok/s (#600); V100 32GB, IQ2_XS: prompt +22% from #540 |
-| RTX 20 (Turing) | 7.5 | **supported**, the ready-made engine | opt-in: `STRATA_BF16_TC=1` runs the BF16 projections on the FP16 tensor cores | RTX 2080 Ti, Q2_0: prompt +15-18% (#655) |
+| RTX 20 (Turing) | 7.5 | **supported**, the standard engine | opt-in: `STRATA_BF16_TC=1` runs the BF16 projections on the FP16 tensor cores | RTX 2080 Ti, Q2_0: prompt +15-18% (#655) |
 
 A card needs enough VRAM to be useful: 12 GB or more is recommended, as for every card (a 2 GB GT 1030 is compute
 capability 6.1 too, and cannot hold any of the model).
@@ -24,7 +24,7 @@ capability 6.1 too, and cannot hold any of the model).
 
 | Cards | Architecture | How it runs | Reported |
 | --- | --- | --- | --- |
-| RX 6800 / 6900 series | gfx1030 | setup (`--backend hip`), unvalidated; #540's attention kernel is the default there, with 8 cells per step and DPP lane exchanges (bit-exact; `STRATA_ATTN_PRE75=0` runs the standard kernel) | [AMD_HIP.md](AMD_HIP.md#rdna2-gfx1030); RX 6900 XT, IQ3_S: prompts +4-6% alone, +7-12% with #835 ([bench/results/2026-10-04-rdna2-pre75-attention](../bench/results/2026-10-04-rdna2-pre75-attention/README.md)) |
+| RX 6800 / 6900 series | gfx1030 | setup (`--backend hip`), unvalidated; #540's attention kernel is the default there, with 8 cells per step and DPP lane exchanges (bit-exact; `STRATA_ATTN_PRE75=0` runs the standard kernel) | [AMD_HIP.md](AMD_HIP.md#rdna2-gfx1030); RX 6900 XT, IQ3_S: prompts +4-6% alone, +7-12% with #835 ([#835](https://github.com/Niko1221/Strata/pull/835)) |
 | RX 6700 XT | gfx1031 | setup (`--backend hip`), unvalidated (#524) | used daily by its reporter, one card |
 | RX 5500 XT (RDNA1) | gfx1012 | built by hand: `-DCMAKE_HIP_ARCHITECTURES=gfx1012` (HIP 5.7 or 7) | 8 GB card, IQ3_S, 8K prompt: 15.3 tok/s decode (#442) |
 | RX 5700 XT (RDNA1) | gfx1010 | built by hand: `-DCMAKE_HIP_ARCHITECTURES=gfx1010`, on ROCm 7.14's `gfx101X-dgpu` wheels; needs `ROCR_VISIBLE_DEVICES=0` in a PC that also has an AMD iGPU | 8 GB card, Coder IQ1_M, 32K context: prompt 115 / 144 / 149 tok/s and decode 18.0 / 20.3 / 23.3 tok/s at 4K / 16K / 30K prompt tokens, 6 of 6 needle checks at 8K and 30K, 61 of 61 ctest on the card, 607 of 12,288 experts in VRAM |
@@ -38,10 +38,10 @@ CUDA 13 dropped Pascal and Volta: it cannot compile for them. Setup therefore ke
 CUDA 12.9 and `-DSTRATA_EXPERIMENTAL_SM60=ON`, in its own folder (`engine-cuda12\`, beside `engine\`). One engine runs
 per model, so the choice is made per model, by the oldest card that model runs on:
 
-- **Every card the model uses is RTX 20 or newer:** the ready-made CUDA 13 engine, as always.
-- **A card is Pascal or Volta:** the CUDA 12 engine. Setup says so (`CUDA 12: sm_70 is older than CUDA 13 supports
-  ...`). On Windows it downloads `strata-windows-x64-cuda12.zip` with NVIDIA's CUDA 12 libraries (from pip, like the
-  CUDA 13 ones); on Linux, or with `--build`, it compiles the engine with a CUDA 12.x toolkit.
+- **Every card the model uses is RTX 20 or newer:** the CUDA 13 engine, as always.
+- **A card is Pascal or Volta:** the CUDA 12 engine, compiled the same way with a CUDA 12.x toolkit (the CUDA 12
+  build's cuBLAS and CUDA runtime come from pip). Setup says so (`CUDA 12: sm_70 is older than CUDA 13 supports
+  ...`) and keeps that engine in `engine-cuda12/`.
 
 ### Opting in
 
@@ -55,7 +55,7 @@ An older card is used only when you choose it; a PC with a newer card keeps reco
 | `--cuda 13` | the CUDA 13 engine even with an older card (a warning: it has no code for that card) |
 | `STRATA_EXPERIMENTAL_SM60=1` | the older cards are listed as usable (the setting from #295 still works) |
 
-The choice is kept in the model's config (`"cuda": 12`): its starts and `UPDATE.bat` keep it, and other models keep
+The choice is kept in the model's config (`"cuda": 12`): its starts keep it, and other models keep
 their own engine. Setting the model up again chooses again (by its cards; add `--cuda 12` to keep a forced choice). A Pascal / Volta card added to a model at a start (`--gpus`) moves that model to the
 CUDA 12 engine.
 
@@ -80,7 +80,7 @@ cmake --build build-cuda12 --target strata -j
 ```
 
 Setup does the same when it compiles: it looks for the newest CUDA 12.x toolkit (`STRATA_NVCC=<path to nvcc>` picks
-one, #601; on glibc 2.43 use 12.8, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
+one, #601; on glibc 2.43 use CUDA 12.8).
 
 On GCC 12.3 with nvcc (openEuler 24.03, CUDA 12.8, 2x V100) the build needed `-D_BITS_OPT_RANDOM_H` added to the host flags (#1074; one
 report, not reproduced here). The `size_t` error in `vmm.hpp` that the same report hit is fixed in 0.1.40.2.
@@ -89,7 +89,7 @@ report, not reproduced here). The `size_t` error in `vmm.hpp` that the same repo
 
 `-DSTRATA_EXPERIMENTAL_SM60=ON` lowers the runtime floor to compute capability 6.0 and compiles the older cards' code
 paths into that build only: the Volta prompt attention (#600), #540's attention kernel (used below sm_75), and the
-Pascal BF16 path. The ready-made CUDA 13 engine has none of them, so its kernels and its output are unchanged. The
+Pascal BF16 path. The CUDA 13 engine has none of them, so its kernels and its output are unchanged. The
 FP16 path for BF16 projections is in every build but runs by default only below sm_75; RTX 20 owners can try it with
 `STRATA_BF16_TC=1` (`=0` turns it off on a V100). It is not bitwise the same as cuBLAS's BF16 kernel (FP16 tensor-core
 sums round differently): #540 measured a mean KL of 8.4e-3 on the next-token distribution of 24 code prompts on a V100
@@ -169,8 +169,7 @@ another wave32 AMD card). [NVIDIA_V100.md](NVIDIA_V100.md) has the V100 build, i
 ### Tesla P40 (sm_61): what was measured and changed
 
 One Tesla P40 24 GB in a 20-vCPU VM (Xeon E5-2695 v4, 98 GB RAM), CUDA 12.4 (cuBLAS 12.4.5.8), IQ3_S with MTP
-(`--spec 4`), int8 KV, `--max-context 262144`, engine 0.1.43.1; the numbers and every run are in
-[bench/results/2026-10-12-p40-sm61-kernels](../bench/results/2026-10-12-p40-sm61-kernels/README.md).
+(`--spec 4`), int8 KV, `--max-context 262144`, engine 0.1.43.1.
 `STRATA_PREFILL_TIMING=1`, `STRATA_DECODE_TIMING=1` and `STRATA_VERIFY_PROFILE=1` show a card that is the bottleneck
 everywhere: the prompt's GPU timeline equals its wall time (waiting for expert copies 0.2%, host grouping 0.2% of a
 7K-token prompt) and a decode window is 49 ms of GPU stages with 1-3 ms of CPU experts. Of a 7K-token prompt, 36% is
@@ -286,5 +285,4 @@ Setup does not build these; build by hand and run `serve/server.py` with a confi
 ## Reports welcome
 
 These paths stay experimental until more people run them. A report with the card, the driver / ROCm version, the
-model and the engine log (`strata-<model>.log`) in an issue helps; [COMMUNITY_BENCHMARKS.md](COMMUNITY_BENCHMARKS.md)
-has the format for measurements.
+model and the engine log (`strata-<model>.log`) in an issue helps.

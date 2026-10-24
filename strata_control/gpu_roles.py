@@ -1,4 +1,4 @@
-"""Main / Helper / Off for every graphics card: ONE place for the app, `strata launch`, setup and the server.
+"""Main / Helper / Off for every graphics card: ONE place for setup, the server and the tools.
 
 A card has one of three roles:
 * Main   - the card that runs the LAST stage of the layer split: the output head, the draft layer and the check of its guesses. Exactly one.
@@ -7,7 +7,7 @@ A card has one of three roles:
 
 The engine takes the cards in stage order (`"gpu": [helper, ..., main]` with `"gpu_order": "as_given"`), so the Main card is the LAST one. This
 module turns roles into that list (and back), recommends roles, and words the few warnings a person could not work out alone.
-The app has the same rules in apps/host/src/lib/gpu-roles.ts; both run tests/data/gpu_roles_vectors.json.
+The rules are checked against the shared vector file tests/data/gpu_roles_vectors.json.
 
 Pure functions, no I/O.
 """
@@ -153,7 +153,7 @@ def normalize(roles: dict[int, str], cards: list[dict]) -> dict[int, str]:
 
 
 def set_role(roles: dict[int, str], cards: list[dict], idx: int, role: str) -> tuple[dict[int, str], str | None]:
-    """One click: the new roles and a code for the quiet line the app/Terminal may show (None: nothing to say).
+    """One click: the new roles and a code for the quiet line the installer may show (None: nothing to say).
     Codes: old_main_helper:<i> (the old Main became a Helper), promoted:<i> (this card became Main because the Main left), only_main (refused)."""
     cs = {_idx(c): c for c in cards}
     out = dict(roles)

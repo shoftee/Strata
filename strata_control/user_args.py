@@ -1,18 +1,19 @@
 """The engine options a person set by hand in a model's run config (strata-<model>.json).
 
-Setup and the app write ``"args"`` from their own choices, and used to write it again on every run, so an option added by
-hand (the control vector options, a --vram-reserve-mib of 0, --spec, ...) was gone after the next Load (#3216 #3215 #3270).
+Setup and the server's Settings view write ``"args"`` from their own choices, and used to write it again on
+every run, so an option added by hand (the control vector options, a --vram-reserve-mib of 0, --spec, ...) was
+gone after the next Load (#3216 #3215 #3270).
 The run config now keeps what the person set apart from what was generated:
 
 * ``"user_args"``: the person's options, in the same form as ``"args"`` (``["--vram-reserve-mib", "0", ...]``).  Every start
   (serve/server.py engine_args) and every setup run applies them on top of the generated ones; for the same flag the
-  person's value wins.  The person can edit this list by hand; the app's settings window writes the options it shows here.
-* ``"args_written"``: the whole ``"args"`` as setup or the app last wrote it.  An option in ``"args"`` that is not in this
+  person's value wins.  The person can edit this list by hand; the page's Settings view writes the options it shows here.
+* ``"args_written"``: the whole ``"args"`` as setup or the Settings view last wrote it.  An option in ``"args"`` that is not in this
   copy was added or changed by hand since: ``capture`` moves it into ``"user_args"``.  A config without the copy (one an
   older Strata wrote) has nothing to compare with: setup then keeps the options of the old file that its new arguments do not
   have (see ``dropped_by_setup``).
 
-Writers that change ``"args"`` themselves (setup, the app's resource profile, a tuning run) call ``stamp`` after they have
+Writers that change ``"args"`` themselves (setup, a resource profile, a tuning run) call ``stamp`` after they have
 captured, so their own changes are never mistaken for the person's.
 """
 

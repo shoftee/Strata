@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -178,31 +177,6 @@ class EnginePlaceholders(unittest.TestCase):
         for what, minimum in [("MIN_ENGINE", setup.MIN_ENGINE), ("NVFP4_ENGINE", setup.NVFP4_ENGINE)] + [(m, setup.MODELS[m]["engine"]) for m in setup.MODELS if "engine" in setup.MODELS[m]]:
             self.assertLessEqual(tuple(minimum), tree[:len(minimum)], f"{what} {minimum} is ahead of the tree {tree}")
 
-
-class KqLibrary(unittest.TestCase):
-    def test_a_zip_without_strata_kq_does_not_leave_an_old_one(self):
-        with tempfile.TemporaryDirectory() as d:
-            eng, tmp = Path(d) / "engine", Path(d) / "new"
-            eng.mkdir()
-            tmp.mkdir()
-            (eng / setup.EXE).write_bytes(b"old")
-            (eng / setup.KQ_LIB).write_bytes(b"old kq")
-            (tmp / setup.EXE).write_bytes(b"new")
-            setup.install_unpacked(tmp, eng)
-            self.assertEqual((eng / setup.EXE).read_bytes(), b"new")
-            self.assertFalse((eng / setup.KQ_LIB).exists())
-            self.assertEqual((eng / setup.PREVIOUS_ENGINE / setup.KQ_LIB).read_bytes(), b"old kq")   # a rollback gets it back
-
-    def test_a_zip_with_strata_kq_replaces_it(self):
-        with tempfile.TemporaryDirectory() as d:
-            eng, tmp = Path(d) / "engine", Path(d) / "new"
-            eng.mkdir()
-            tmp.mkdir()
-            (eng / setup.KQ_LIB).write_bytes(b"old kq")
-            (tmp / setup.EXE).write_bytes(b"new")
-            (tmp / setup.KQ_LIB).write_bytes(b"new kq")
-            setup.install_unpacked(tmp, eng)
-            self.assertEqual((eng / setup.KQ_LIB).read_bytes(), b"new kq")
 
 
 class ImageEncoderDefault(unittest.TestCase):

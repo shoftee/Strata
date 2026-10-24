@@ -1,8 +1,9 @@
 """The line between serving and acquiring.
 
 Starting a model and serving an API never install, download or compile anything. Everything that
-reaches the network or runs pip, git, cmake or a package manager lives behind an explicit command:
-SETUP, UPDATE or `strata install`. This module is that line, in one place:
+reaches the network or runs pip, git, cmake or a package manager lives behind an explicit step:
+the install, the update, or the model download of a bundled install. This module is that line, in one
+place:
 
 * `forbidden()` marks a stretch of code (a start, a serve) in which acquiring is not allowed;
 * `require(what, command)` is called by every acquiring primitive (a download, a pip install, a
@@ -44,10 +45,10 @@ class AcquisitionRefused(RuntimeError):
 
 
 def explicit_commands() -> str:
-    """The commands that acquire, named for this platform."""
+    """The command that acquires, named for this platform."""
     if os.name == "nt":
-        return "SETUP.bat (first-time setup), UPDATE.bat (update) or `strata install`"
-    return "./setup.sh (first-time setup), ./update.sh (update) or `strata install`"
+        return "SETUP.bat"
+    return "./setup.sh"
 
 
 def is_forbidden() -> bool:

@@ -1,19 +1,22 @@
-"""Which graphics cards a model should use: ONE place for the app, `strata launch` and setup.
+"""Which graphics cards a model should use: ONE place for setup, the server and the tools.
 
 The rule (owner decision):
 1. First try the model on ONE card (the largest) plus system RAM, the normal hybrid mode.
 2. Only when that does not fit, or would be too tight, offer to add the second card as a layer split.
 3. Let the person choose: every option comes with plain numbers and a recommended one is pre-selected (recommend, never force).
 
-The memory arithmetic is native-fit.ts `fitOn` (apps/host/src/lib/native-fit.ts) with the same constants (a test keeps them equal):
-the experts are held first in the graphics memory beyond about DENSE_GB (the dense weights, buffers and a 32K cache), then in RAM beyond
+The memory arithmetic follows the measured shape of a running model, with the constants below (a test keeps the
+The memory arithmetic follows the measured shape of a running model, with the constants below (a test keeps 
+the recommendations equal across the vector file): the experts are held first in the graphics memory beyond 
+about DENSE_GB (the dense layers stay there); what remains after that and about SYSTEM_ROOM_GB left for the 
+system is the pool; whatever does not fit is read from the SSD (`spill_gb`). A split adds the memory of the 
 about SYSTEM_ROOM_GB left for the system; whatever is left would be read from the SSD (`spill_gb`). A split adds the memory of the extra
 cards but every extra card holds its own dense layers and prompt buffers, so each one costs SPLIT_CARD_OVERHEAD_GB of that (an estimate:
 docs/MULTI_GPU.md says each card "holds the dense weights of its layers and its own prompt buffers").
 
 Cards that count: not integrated (an iGPU shares the system RAM and is ignored), at least MIN_CARD_GB of graphics memory, flagged usable by
 the caller's own driver checks (NVIDIA RTX 20 or newer, a supported AMD card, ...). A card needs SPLIT_MIN_VRAM_GB to share a model.
-Pure functions, no I/O: setup.py, strata_cli/launch and tools/strata_mcp.py import it.
+Pure functions, no I/O: setup.py imports it.
 """
 
 from __future__ import annotations

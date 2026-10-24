@@ -2,7 +2,7 @@
 
 Strata runs [Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) (35B mixture of experts, 3B active, 256 experts, top-8) from
 [Unsloth's GGUFs with the MTP layer](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF) (UD-Q4_K_XL, UD-Q6_K_XL, Q8_0) on its own
-engine path (`src/qwen35`; `strata` switches to it from the file's architecture). Pick it in the app's model list, in `strata launch` or in setup (`--family qwen36`). Besides text it
+engine path (`src/qwen35`; `strata` switches to it from the file's architecture). Pick it in setup (`--family qwen36`). Besides text it
 reads **pictures** and serves **several requests at once**, the same two options the Flash-Next models have.
 
 Measured on an AMD Radeon AI PRO R9700 32 GB (HIP, Linux, UD-Q4_K_XL, every expert in VRAM) and on an RTX 3060 12 GB (CUDA, 20 threads,

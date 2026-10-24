@@ -5,11 +5,12 @@ fastest on that GPU architecture. Its solution ids are valid for one architectur
 (src/prefill/gemm.cu) and falls back to plain hipBLAS for anything else, so a wrong table can never change a result, it only wastes the
 speed-up. The table picks a GEMM algorithm: it does not change what the model is asked to compute.
 
-Package side (packaging/stage_tuning.py, tools/hip/package_windows.py): ``tuning/<arch>-hipblaslt-<version>.txt`` inside the engine package,
+Package side (`check_stage`, and `tools/hip/package_windows.py` when it stages a build): ``tuning/<arch>-hipblaslt-<version>.txt`` inside the engine package,
 one per architecture of the package that has a table for the hipBLASLt version the package bundles, and ``hipblaslt_version`` in its BUILD.json.
-The files are listed (and hashed, and signed) in engine-component.json like every other file of the package.
+The files are listed in engine-component.json like every other file of the package.
 
-Start side (serve/server.py with_component_engine, setup.py in the app): ``resolve`` reads the package, the GPUs in this PC and the switch,
+Start side (serve/server.py with_component_engine, setup.py on a component-engine install): ``resolve`` reads the package, the GPUs in
+this PC and the switch,
 and returns the table to use or the reason there is none. Nobody sets STRATA_HIPBLASLT_TUNING by hand:
 
 * ``STRATA_HIPBLASLT_TABLE`` (or ``"hipblaslt_table"`` in the run config): ``off`` / false never uses the packaged table, ``on`` / true
@@ -120,7 +121,7 @@ def check_stage(stage, archs) -> list[str]:
     stage, problems = Path(stage), []
     version = package_version(stage)
     if version is None:
-        problems.append("BUILD.json has no hipblaslt_version (packaging/stage_tuning.py writes it): a start could not match a tuning table to this hipBLASLt")
+        problems.append("BUILD.json has no hipblaslt_version (tools/hip/package_windows.py writes it): a start could not match a tuning table to this hipBLASLt")
     folder = stage / TABLE_DIR
     if folder.is_dir():
         for path in sorted(folder.iterdir()):

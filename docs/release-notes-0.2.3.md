@@ -1,4 +1,9 @@
 **0.2.3: faster Strix Halo, Intel Arc as a released engine package, the DFlash2 drafter (opt-in, Terminal only), a calmer agent chat when the context fills up, and a steadier Terminal.** It also fixes the issues listed below. Each speed claim says what it was measured on. The engine packages are version 0.1.48 (0.2.2 had 0.1.47) and the app is 0.2.3. Update with `strata update` (Terminal) or Settings > Update (app). If you are on 0.2.0-beta, read "Updating" first.
+> **A note on this history.** These are the release notes as they were written for 0.2. This copy of Strata has
+> no desktop app, no `strata` command and no Docker images: anything below about those - a `.dmg`, the app's
+> Settings, `strata launch`, a Terminal archive - describes what this tree does not ship. The engine, the server,
+> the installer and the model work as described.
+
 
 ## What is new
 

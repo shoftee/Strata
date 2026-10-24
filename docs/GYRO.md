@@ -21,8 +21,8 @@ Not defaults, by measurement (our evaluation, 2026-10): against Q2_0 at the same
 divergence (0.159 against 0.312 on 128 chunks) and is level with IQ3_XXS (0.157), but decodes 16-21% slower on a 12 GB
 card (RTX 3060, measured before engine 0.2.2: 16% since) and an R9700, and its reasoning set scored lower than Q2_0's (49/60 against 57/60). Gyro-S is 13% worse
 in KL than IQ2_XS (0.268 against 0.236) with 24% fewer bytes. So: pick Gyro-S where nothing bigger fits, Gyro-M when
-the 20% memory saving over IQ3_XXS matters. Setup and the MCP server mention them only where the other sizes do not
-fit the PC; they warn, never refuse. Gyro-L (agentionai's 50 GiB file, 2026-10-12) is not supported: it uses another
+the 20% memory saving over IQ3_XXS matters. Setup mentions them only where the other sizes do not
+fit the PC; it warns, never refuses. Gyro-L (agentionai's 50 GiB file, 2026-10-12) is not supported: it uses another
 trellis family (types 147-149) that the engine does not have.
 
 ## Install
@@ -34,8 +34,8 @@ trellis family (types 147-149) that the engine does not have.
 Setup downloads the pinned revision of the file (size and SHA-256 checked), prepares the pack (`tools/iq_pack.py
 --compat-bf16`: the Hadamard table and the dense weights, 1.5 GB), the draft head (Strata's own MTP head, prepared from
 the original model as for every Qwen3.8-Flash-Next file) and the start script. Needs engine 0.1.45.1 or newer: the pack is native_experts.txt v5 (Hadamard-folded), which the engine reads since the
-APR port, and the released 0.1.45 stops at v4. A ready-made engine that is older is replaced by one compiled from this source
-(setup), or the app says the model needs a newer engine and offers Update engine.
+APR port, and the released 0.1.45 stops at v4. An installed engine that is older is replaced by one compiled from this source
+(setup), and setup says so.
 
 **Supported:** NVIDIA (CUDA, Linux and Windows) and AMD (HIP, experimental: the authors validated gfx1151; we ran
 gfx1201 with identical output to rc2). **Intel Arc** (SYCL, Linux, built from source) runs both files: see [Intel Arc](#intel-arc-sycl). **Apple Silicon Macs** (Metal) run both files from
@@ -49,7 +49,7 @@ the card's reader from 24 GB. This needs engine 0.1.45.1 or newer, like the Gyro
 **RTX 50 cards (sm_120).** Gyro gives correct output on them with engine 0.1.45.3. The fused gate/up SwiGLU kernel, which
 is the default on compute capability 12.0 cards, handles only rows of 80 dot products; Gyro's trellis rows have 160, and
 before the fix they went through it anyway. Gyro-S then answered with loops, garbage or nothing: on an RTX PRO 5000, 0 of
-8 test questions were answered right before the fix and 8 of 8 after it (greedy and with the app's sampling). Now those
+8 test questions were answered right before the fix and 8 of 8 after it (greedy, and again with the run config's sampling). Now those
 rows use the full-warp kernel, and the identity gate (10 prompts, 4K and 20K prompts) is identical to the run with the fused
 kernel off. If Gyro misbehaves on an RTX 50 card, update the engine.
 
@@ -57,8 +57,8 @@ kernel off. If Gyro misbehaves on an RTX 50 card, update the engine.
 Strata builds against upstream ggml, which does not have them, so it adds them itself at configure time:
 `cmake/strata_ggml_tq_overlay.cmake` writes a copy of the pinned ggml-cuda headers into the build folder with the three
 trellis types routed like IQ2_XS (the tile loader is the fork's, `third_party/ggml-tq/`); only Strata's own MMQ library sees
-the copy, every other type is compiled from the untouched files (identity gate below). The ready-made engines read Gyro
-prompts through it as fast as rc2 does, and bit for bit the same. If the pinned ggml changes and an anchor of the script
+the copy, every other type is compiled from the untouched files (identity gate below). The engine reads Gyro prompts
+through it as fast as rc2 does, and bit for bit the same. If the pinned ggml changes and an anchor of the script
 no longer matches, the overlay switches itself off with a message and prompts take the slower FP16 path. A build against the
 fork (`-DSTRATA_GGML_DIR=<agentionai/llama.cpp>`, as rc2 does) uses the fork's own instances instead.
 
@@ -69,7 +69,7 @@ Setup lists them for an Arc like for any card and warns, never refuses, when VRA
 card: an Arc A750 (8 GB, i915 driver) in a PC with a Ryzen 5 5600X (6 cores, AVX2) and 62 GB of RAM, on the first-release files of Gyro-S and
 Gyro-M (the same size as the pinned ones, a different SHA-256). The pinned Gyro-S passes the same parity run (16 cases, 0 failures) and
 answers correctly through the server; it was not compared with CUDA.
-Not tested by us: a B-series card (supported since 2026-10-22; `strata launch` says it is new and how to report a problem), two Arc cards (the second-card expert helper refuses a Gyro pack and says so), an Arc on the xe driver. The Battlemage AOT build
+Not tested by us: a B-series card (supported since 2026-10-22; setup says it is new and how to report a problem), two Arc cards (the second-card expert helper refuses a Gyro pack and says so), an Arc on the xe driver. The Battlemage AOT build
 (`bmg-g31`) compiles with the trellis kernels; it was not run.
 
 The trellis decode kernels do the same integer and float operations in the same order as the CUDA ones (int8 codebook, q8_1 activations),
@@ -238,7 +238,7 @@ Gyro release (2026-10-07). A = agentionai/Strata rc2 9ff02c9, B = this port.
 | --- | --- | ---: | --- | ---: | ---: |
 | agentionai fork | Gyro-S | 85.4 / 89.7 (1.051) | 5/5 | 5418 / 5313 (0.98) | 14358 / 13859 (0.97) |
 | agentionai fork | Gyro-M | 72.7 / 82.7 (1.136) | 5/5 | 5183 / 5520 (1.07) | 13421 / 14164 (1.06) |
-| upstream + overlay (the ready-made engine) | Gyro-S | 85.3 / 89.6 (1.050) | 5/5 | 5413 / 5298 (0.98) | 14372 / 13854 (0.96) |
+| upstream + overlay (this build) | Gyro-S | 85.3 / 89.6 (1.050) | 5/5 | 5413 / 5298 (0.98) | 14372 / 13854 (0.96) |
 | upstream + overlay | Gyro-M | 72.6 / 82.6 (1.138) | 5/5 | 5682 / 5524 (0.97) | 15005 / 14160 (0.94) |
 | upstream, no overlay (FP16 prompt path) | Gyro-S | 85.3 / 89.6 (1.050) | 5/5 | 5425 / 6939 (1.28) | 14364 / 21677 (1.51) |
 
@@ -365,5 +365,4 @@ Single RTX 4090 smoke run (Gyro-S, MTP draft, greedy): code 107.5, prose 84.3, J
 
 Apple Silicon Macs run Gyro-S and Gyro-M from 0.2.2 (Metal kernels in `metal/kernels`, the same published files, the same
 Hadamard-folded pack). What a Mac needs, the measured speeds on a 32 GB Mac mini and what was checked are in
-[MAC.md](MAC.md#gyro-s-and-gyro-m-agentionais-trellis-experts). Setup: `./setup.sh --family gyro --model Gyro-S` (the app and
-`strata launch` list it under Gyro models).
+[MAC.md](MAC.md#gyro-s-and-gyro-m-agentionais-trellis-experts). Setup: `./setup.sh --family gyro --model Gyro-S`.

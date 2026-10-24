@@ -81,15 +81,5 @@ class DefsTest(unittest.TestCase):
             self.assertTrue(cache.exists())                                  # the normal build's folder untouched
 
 
-class McpTest(unittest.TestCase):
-    def test_no_avx2_is_a_note_not_a_refusal(self):
-        import strata_mcp as M
-        s = M.Strata(ROOT)
-        gpu = [{"index": 0, "name": "x", "vram_gb": 24.0, "usable": True, "vendor": "nvidia"}]
-        r = s.recommend({"ram_gb": 64, "gpus": gpu, "cpu": {"avx2": False}})
-        self.assertIsNotNone(r["model"])
-        self.assertTrue(any("no AVX2" in n and "EXPERIMENTAL" in n for n in r["notes"]))
-
-
 if __name__ == "__main__":
     unittest.main()

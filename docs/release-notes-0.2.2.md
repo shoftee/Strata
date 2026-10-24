@@ -1,4 +1,9 @@
 **0.2.2: Gyro on Intel Arc cards and on Macs, faster Gyro on NVIDIA cards, a Main / Helper / Off choice for each graphics card, one models folder for the app and the Terminal, an engine package for the RX 6000 series, an optional API key, and one definition of answer speed.** It also fixes the issues listed below. Each speed claim says what it was measured on, and each new default says whether the answers stay identical. The engine packages are version 0.1.47 (0.2.1 had 0.1.46) and the app is 0.2.2. Update with `strata update` (Terminal), Settings > Update (app), or `UPDATE.bat` / `./update.sh` (source installs).
+> **A note on this history.** These are the release notes as they were written for 0.2. This copy of Strata has
+> no desktop app, no `strata` command and no Docker images: anything below about those - a `.dmg`, the app's
+> Settings, `strata launch`, a Terminal archive - describes what this tree does not ship. The engine, the server,
+> the installer and the model work as described.
+
 
 ## What is new
 

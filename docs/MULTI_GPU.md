@@ -11,15 +11,15 @@ verify window (a few hundred KB through pinned RAM), not twice per layer. No NVL
 needed; cards on x4 or x1 slots work, and the PCIe share of each card is probed on its own link. A `--pcie-frac` you give
 is every card's share and skips those probes; there is no per-card setting yet.
 
-**Two models on two cards (the app).** A layer split puts one model on several cards. The other way to use two cards is two
-models, one per card, each answering on its own. In the app, turn on **Run multiple models** on the Models page: the card
-list then says which card a loaded model uses ("In use by ..."), starts that card as Off for the next model, and
-explains a failed start on a card that is taken. Measured on a PC with Radeon AI PRO R9700 cards (two of four, Linux): Q2_0 on
+**Two models on two cards.** A layer split puts one model on several cards. The other way to use two cards is two
+models, one per card, each answering on its own: this server runs one model, so that means two servers, each with its own
+run config, card and port (the roles below say which card each one may use).
+Measured on a PC with Radeon AI PRO R9700 cards (two of four, Linux): Q2_0 on
 one card and IQ3_XXS on another both loaded (33 s and 59 s with the files cached, 114 s the first time), both answered chats
 (about 60 tokens/s each), the Monitor listed both, and unloading one left the other answering. This was run with the AMD build only;
-the same app code drives NVIDIA cards, but we have not run two models on two NVIDIA cards.
+the same paths drive NVIDIA cards, but we have not run two models on two NVIDIA cards.
 
-**One make of card per engine.** An engine drives one make of card (NVIDIA, AMD or Intel). The app, `strata launch` and setup
+**One make of card per engine.** An engine drives one make of card (NVIDIA, AMD or Intel). Setup and the server
 offer only the cards the engine can drive, never split a model across two makes, say in one plain line when the other make has
 the bigger card, and say that two models at once on two makes is not supported.
 
@@ -54,12 +54,12 @@ Every card has one of three roles:
 The Main card is the **last** card in the engine's order, not the first. The first card runs the first layers and, by default,
 the picture reader. (Older versions of this page said "the first is the main one"; that has not been true since 0.1.41.1.)
 
-**Recommended roles** (the same rule in the app, `strata launch` and setup; `strata_control/gpu_roles.py`): the faster card
+**Recommended roles** (the same rule in setup and in `strata_control/gpu_roles.py`): the faster card
 is Main (speed is multiprocessors x max clock, the engine's own measure; cards within 5% are the same card, and the one with
 more memory wins, then the lower number; two identical cards: the highest number is Main, so the engine order stays 0, 1 as it always was; a card with clearly more memory beats a faster one that is at least half as fast).
 Every other card starts as Helper, except a card with **8 GB or less** when a bigger card is there (Off; with only 8 GB cards, say two GTX 1080, the second one is a Helper), built-in graphics beside a card with memory of
-its own (Off) and a card the engine cannot run (Off). Every role is one click (the app), one key (`strata launch`: M, H, O;
-R goes back to the recommendation) or one line (below).
+its own (Off) and a card the engine cannot run (Off). Every role is the recommendation, accepted or answered with one line,
+or a line in the run config (below).
 
 Only a few things are warned about, in one short line each: built-in graphics as Main, a card the engine cannot run, too
 little memory for the chosen setup (part of the model would be read from the drive). **Every card Off** is allowed. The CUDA,
@@ -69,12 +69,10 @@ the processor (the Mac engine) says "Performance is degraded on CPU only." and g
 **Setting roles**
 
 ```
-strata launch --gpu-roles 1=main,0=helper       cards you do not name are Off
-./setup.sh --gpu-roles 1=main,0=helper          (START-HERE.bat --gpu-roles ... on Windows); saved
-strata launch                                     the Cards step: M Main, H Helper, O Off, R recommended, D details
+./setup.sh --gpu-roles 1=main,0=helper         (START-HERE.bat --gpu-roles ... on Windows); saved
 ```
 
-or in the run settings (`strata-*.json`), which is what the app writes:
+or in the run settings (`strata-*.json`):
 
 ```json
 "gpu_roles": {"1": "main", "0": "helper", "2": "off"},
@@ -86,10 +84,11 @@ or in the run settings (`strata-*.json`), which is what the app writes:
 cards left out. The server reads `gpu_roles`; when `gpu` was edited by hand and no longer matches, `gpu` wins and the log says
 so (a settings file that names its cards keeps them). Nothing is rewritten on upgrade: a file with only `"gpu": [1, 0]` shows
 as Main = the last card, Helper = the first, the rest Off. The recommendation itself is not saved, so a card you add later is
-recommended again; a card you add after choosing roles starts Off. Docker: `GPU_ROLES=1=main,0=helper` is passed as `--gpu-roles`.
+recommended again; a card you add after choosing roles starts Off.
 
 **One rule for which cards count** (`strata_control/gpu_fit.py` keeps the memory arithmetic): not an integrated chip beside
-a real card, at least 4 GB of graphics memory to be listed, 8 GB or less starts Off beside a bigger card. The arithmetic is the app's `fitOn`;
+a real card, at least 4 GB of graphics memory to be listed, 8 GB or less starts Off beside a bigger card. The rule is
+`gpu_fit.py`'s; a layer-split model needs both the VRAM and the RAM of the cards it runs on.
 each extra card of a split costs an estimated 2 GB of its own buffers.
 
 **Choosing the cards without roles** (at setup or at any start):
@@ -380,7 +379,7 @@ a card was freed is left out); b/a 5836 and 6432 (timed on the rig), against 102
 
 ## Limits (for now)
 
-- **Works across cards** (bench/results/2026-09-29-layer-split-limits):
+- **Works across cards**:
   - images (`--vision`): each card keeps its own image-position table;
   - control vectors and the experimental speed projection: each card holds the vector's tables, switched on and
     off per request on all of them;
@@ -404,8 +403,7 @@ a card was freed is left out); b/a 5836 and 6432 (timed on the rig), against 102
 
 ## Measured
 
-The Coder on an RTX 5080 + RTX 3090 (Ryzen 9 9950X3D), 32K context; details in
-`bench/results/2026-09-29-layer-split/`:
+The Coder on an RTX 5080 + RTX 3090 (Ryzen 9 9950X3D), 32K context:
 
 | | Prompt 16K / 28K tok/s | Decode story / code tok/s |
 |---|---|---|

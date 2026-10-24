@@ -1,9 +1,9 @@
 """tools/_paths.py - where the tools find llama.cpp's gguf-py (for the MTP packer and the fixtures).
 
 Order: $STRATA_GGUF_PY, then <engine>/third_party/llama.cpp/gguf-py (what setup.py clones), then the development
-tree's ../../.ref/llama.cpp/gguf-py, then (#3269) the install folders: in the Control package setup.py writes third_party/
-to the per-user install folder ($STRATA_INSTALL_DIR, else the app's folder, the Terminal's remembered installs), not
-beside the tools, so a tool run by hand from the package finds it there.
+tree's ../../.ref/llama.cpp/gguf-py, then (#3269) the install folders: setup.py writes third_party/
+to the per-user install folder ($STRATA_INSTALL_DIR, else the folder holding setup.py), not
+beside the tools, so a tool run by hand from an install finds it there.
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def gguf_py() -> str:
             return str(c)
     sys.exit("llama.cpp's gguf-py was not found. Set STRATA_GGUF_PY to the gguf-py folder of any llama.cpp checkout "
              "(<llama.cpp>/gguf-py), or run setup.py once (it downloads llama.cpp into third_party/ of the install "
-             "folder; in the desktop app or the Terminal package that folder is STRATA_INSTALL_DIR, which this tool also "
+             "folder; with STRATA_INSTALL_DIR set that folder is the one it names, which this tool also "
              "looks in)")
 
 

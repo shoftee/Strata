@@ -234,17 +234,15 @@ class InstalledModelsNeedNoNetwork(unittest.TestCase):
                 quiet(setup.download, pinned_url("Q2_0/x.gguf"), Path(d) / "x.gguf")
 
     def test_the_runtime_has_no_model_host_in_it(self):
-        """strata launch, serve, the monitor and the API reach no model host: the names are in setup.py and the install
+        """serve, the monitor and the API reach no model host: the names are in setup.py and the install
         tools only (and strata_control.acquisition refuses a download under STRATA_NO_ACQUIRE=1)."""
         hosts = re.compile(r"huggingface\.co|hf-mirror|HF_ENDPOINT|modelscope|hf_hub_download", re.I)
-        # The harmless mentions: the model-card link a benchmark result file names (nothing opens it), and the pinned
-        # DFlash2 drafter address, which only `strata drafting fetch` downloads from, behind acquisition.require (refused
-        # under STRATA_NO_ACQUIRE, so a start or a server never reaches it). Dropping just those lines from the scan keeps
-        # the rule exact for everything else.
-        harmless = ('MODEL_CARD_URL = "https://huggingface.co/Qwen/Qwen3.8-Flash-Next"',
-                    'BASE_URL = f"https://huggingface.co/{REPO}/resolve/{REVISION}/"')
+        # The harmless mentions: the pinned DFlash2 drafter address, which only the drafter step downloads
+        # from, behind acquisition.require (refused under STRATA_NO_ACQUIRE, so a start or a server never
+        # reaches it). Dropping just that line from the scan keeps the rule exact for everything else.
+        harmless = ('BASE_URL = f"https://huggingface.co/{REPO}/resolve/{REVISION}/"')
         found = []
-        for folder in ("strata_cli", "serve", "strata_control"):
+        for folder in ("serve", "strata_control"):
             for p in (ROOT / folder).rglob("*.py"):
                 if "test" in p.name:
                     continue

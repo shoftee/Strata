@@ -1729,7 +1729,7 @@ int main(int argc, char **argv) try {
     // turns "it crashed at step 7" into "it crashed somewhere", and the difference is a debugging session.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     // `strata --version` / `-V` (also `strata generate --version`): the version and nothing else, before any GPU is touched, as the CUDA
-    // and HIP engines have answered it. `strata update` runs it as the engine's smoke test, and the Intel package build runs it with
+    // and HIP engines have answered it. the release build runs it as the engine's smoke test, and the Intel package build runs it with
     // an empty environment.
     for (int i = 1; i < argc && i < 3; ++i) {
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-V") == 0) {

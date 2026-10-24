@@ -15,10 +15,9 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
+from serve import legacy_status
 from serve.frontend import ChatTemplate
 from serve.server import ByteTokenizer, Service, StrataEngine, engine_args, parallel_args, serve
-from strata_cli import bench
-from strata_cli.client import Endpoint
 
 # The fake engine: one token every STEP seconds per active slot (a "window" serves every active slot at once);
 # GEN (solo) streams T lines; BGEN reads the prompt (one T line, DONE), answers BADM and continues in the slot.
@@ -373,6 +372,13 @@ class FakeEngineCase(unittest.TestCase):
         with urllib.request.urlopen(self.base + path, timeout=10) as r:
             return json.loads(r.read().decode())
 
+    def snapshot(self):
+        """The versioned telemetry as a client takes it: schema v1 is part of the contract, and the
+        bounded sanitizing pass is the one the endpoint's own module defines (serve/legacy_status.py)."""
+        snap = self.get("/v1/telemetry")
+        self.assertEqual(snap.get("schema_version"), 1)
+        return legacy_status.sanitize_telemetry(snap)
+
     def _two_at_once(self, text_b):
         """A long request first, then one that has to go to a batch slot (the engine is busy with the first)."""
         out = {}
@@ -539,53 +545,6 @@ class ParallelService(FakeEngineCase):
                 self.engine.slot_cv.notify_all()
         self.assertEqual(self.chat("slot freed")["choices"][0]["message"]["content"], "ok, done.")
 
-    def test_benchmark_overload_suite_preserves_batch_recovery(self):
-        self.start(2)
-        self.svc.max_queue = 0
-        self.svc.queue_timeout_s = 0.15
-        out = Path(self.tmp.name) / "overload"
-        report = bench.run(Endpoint(self.base, None), Endpoint(self.base, None), out,
-                           suite="parallel-overload-v1", concurrency=6)
-        self.assertTrue(report["successful"])
-        overload = report["phases"][1]
-        self.assertEqual(overload["kind"], "overload")
-        self.assertGreater(overload["summary"]["expected_overload"], 0)
-        self.assertEqual(overload["summary"]["failed"], 0)
-        self.assertTrue(report["phases"][2]["passed"])
-        self.assertEqual(self.get("/v1/telemetry")["work"]["admission_reserved"], 0)
-
-    def test_benchmark_cancel_suite_releases_batch_queue_and_slots(self):
-        self.start(2)
-        self.svc.max_queue = 1
-        self.svc.queue_timeout_s = 5
-        out = Path(self.tmp.name) / "cancel"
-        report = bench.run(Endpoint(self.base, None), Endpoint(self.base, None), out,
-                           suite="parallel-cancel-v1", concurrency=2, request_timeout=15)
-        self.assertTrue(report["successful"], bench.format_summary(bench.summary(report)))
-        self.assertEqual([row["kind"] for row in report["phases"]],
-                         ["warmup", "cancel_active", "cancel_queued", "recovery"])
-        self.assertEqual(report["phases"][2]["summary"]["companion_successful"], 2)
-        self.assertEqual(self.get("/v1/telemetry")["work"]["admission_reserved"], 0)
-
-    def test_benchmark_prefill_cancel_observes_progress_and_companion_completion(self):
-        self.start(2)
-        out = Path(self.tmp.name) / "prefill-cancel"
-        report = bench.run(Endpoint(self.base, None), Endpoint(self.base, None), out,
-                           suite="parallel-prefill-cancel-v1", concurrency=2, request_timeout=15)
-        self.assertTrue(report["successful"], bench.format_summary(bench.summary(report)))
-        self.assertEqual([row["kind"] for row in report["phases"]],
-                         ["warmup", "cancel_prefill", "recovery"])
-        phase = report["phases"][1]
-        self.assertTrue(phase["summary"]["prompt_read_seen"])
-        self.assertGreater(phase["requests"][0]["prompt_read_at_close"], 0)
-        self.assertLess(phase["requests"][0]["prompt_read_at_close"],
-                        phase["requests"][0]["prompt_tokens_at_close"])
-        self.assertEqual(phase["summary"]["client_disconnect_delta"], 1)
-        self.assertEqual(phase["summary"]["companion_successful"], 1)
-        self.assertEqual(self.get("/v1/telemetry")["work"]["admission_reserved"], 0)
-        data = (out / "results.json").read_text()
-        self.assertNotIn("Explain how a serving system", data)
-
     def test_telemetry_keeps_engine_waiting_age_visible(self):
         self.start(2)
         self.svc.max_queue = 1
@@ -653,7 +612,7 @@ class ParallelService(FakeEngineCase):
         self.assertEqual([(row["stage"], row["device_index"], row["layer_start"], row["layer_end"])
                           for row in topology["stages"]],
                          [(0, 2, 0, 11), (1, 0, 12, 23), (2, 3, 24, 35), (3, 1, 36, 47)])
-        clean = Endpoint(self.base).snapshot()
+        clean = self.snapshot()
         self.assertEqual(clean["topology"]["stages"], topology["stages"])
         self.svc.terminal_visibility_order = []
         partial = self.get("/v1/telemetry")
@@ -686,7 +645,7 @@ class ParallelService(FakeEngineCase):
         self.assertEqual(work["batch_sample_windows"], 1)
         self.assertEqual(work["batch_sample_span_s"], 0.02)
         self.assertGreaterEqual(work["batch_sample_age_s"], 0)
-        clean = Endpoint(self.base).snapshot()
+        clean = self.snapshot()
         self.assertEqual(clean["quality"]["batch_window_rows"], "measured")
         self.assertGreaterEqual(clean["work"]["batch_sample_rows"], 1)
         self.engine.unload()
@@ -707,7 +666,7 @@ class ParallelService(FakeEngineCase):
                 self.fail("fake engine's PSTAT sample did not reach telemetry")
             time.sleep(0.02)
         self.assertEqual(telemetry["work"]["stage_in_flight_us"], [16000, 14000, 12000, 10000])
-        clean = Endpoint(self.base).snapshot()
+        clean = self.snapshot()
         self.assertEqual(clean["quality"]["stage_in_flight"], "measured_host_span")
         self.assertEqual([row["percent"] for row in clean["work"]["stage_in_flight"]],
                          [80.0, 70.0, 60.0, 50.0])
@@ -801,7 +760,7 @@ class ParallelService(FakeEngineCase):
                          sorted(len(reply[t]) + 1 for t in texts))
         self.assertTrue(all(isinstance(r.get("first_engine_token_s"), (int, float)) and
                             r["first_engine_token_s"] > 0 for r in self.svc.history))
-        clean = Endpoint(self.base).snapshot()
+        clean = self.snapshot()
         self.assertTrue(all(isinstance(r.get("first_engine_token_s"), (int, float))
                             for r in clean["recent"][:3]))
         # never more than two in the slots at once (the fake logs how many were active at each admission)

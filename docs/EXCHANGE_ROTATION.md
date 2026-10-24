@@ -182,25 +182,7 @@ AMD and Windows GPU execution remain untested.
 
 The same Blackwell binary passed both CTest checks and the three-mode CUDA
 fixture; Compute Sanitizer reported 0 errors. The
-[receipt](../bench/results/exchange-rotation-ab.json) contains source, binary,
-model, pack and profile hashes, arguments, timings and diagnostics. The
-[raw IDs](../bench/results/exchange-rotation-token-ids.json) retain the input
-and both outputs. To check the token comparison without a model:
-
-```bash
-python - <<'PY'
-import hashlib, json
-from pathlib import Path
-p = Path('bench/results')
-r = json.loads((p / 'exchange-rotation-ab.json').read_text())
-raw = (p / r['token_ids_file']).read_bytes()
-assert hashlib.sha256(raw).hexdigest() == r['token_ids_file_sha256']
-d = json.loads(raw)
-assert len(d['input']) == len(d['off']) == len(d['on']) == 1024
-assert d['off'] == d['on']
-for name, arm in zip(('off', 'on'), r['arms']):
-    sha = hashlib.sha256(json.dumps(d[name], separators=(',', ':')).encode()).hexdigest()
-    assert sha == arm['output_token_ids_sha256']
-print('1,024 identical output token IDs')
-PY
-```
+A/B receipt (source, binary, model, pack and profile hashes, arguments, timings
+and diagnostics) and the raw token-ID files (the input and both outputs) were
+saved with the measurement report; the comparison was checked without a model
+by hashing the stored IDs against the receipt.

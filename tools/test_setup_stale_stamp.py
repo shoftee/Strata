@@ -124,30 +124,5 @@ class BuildEngineStamp(unittest.TestCase):
         self.assertEqual(self.compiles, 0)
 
 
-class UpdateInstalledEngine(unittest.TestCase):
-    def test_a_poisoned_stamp_makes_the_update_compile(self):
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            eng = root / "engine"
-            eng.mkdir()
-            (eng / setup.EXE).write_bytes(binary("0.1.42"))
-            (eng / "BUILD.json").write_text(json.dumps({"source": "local", "version": "0.1.43", "archs": [86],
-                                                        "vision": "none", "src": "newhash"}))
-            built = []
-            with mock.patch.object(setup, "ROOT", root), \
-                    mock.patch.object(setup, "source_hash", lambda parts: "newhash"), \
-                    mock.patch.object(setup, "source_version", lambda: "0.1.43"), \
-                    mock.patch.object(setup, "update_engine_gpu", lambda tk: dict(GPU)), \
-                    mock.patch.object(setup, "get_llama_cpp", lambda: Path("llama")), \
-                    mock.patch.object(setup, "build_engine", lambda *a, **k: built.append(a)), \
-                    mock.patch.object(setup, "say", lambda *a, **k: None):
-                setup.update_installed_engine("http://x", 13)
-                self.assertEqual(len(built), 1)
-                built.clear()
-                (eng / setup.EXE).write_bytes(binary("0.1.43"))
-                setup.update_installed_engine("http://x", 13)
-                self.assertEqual(built, [])
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -1,19 +1,18 @@
-"""Where Strata's existing installs and model files are: ONE place that the launch screens, `strata models list`, the own-files import
-and `strata launch` all ask.
+"""Where Strata's existing installs and model files are: ONE place that setup, the server and the tools all ask.
 
 Three kinds of place hold a model's run config (`strata-<tag>.json`), looked at in this order, the first that has any is the main one:
 
 * explicit   STRATA_INSTALL_DIR or an --install-dir argument (it is the only place looked at);
-* here       the Terminal's own folder, when it has run configs (a source checkout that ran setup);
+* here       this Strata folder, when it has run configs (a checkout that ran setup);
 * remembered the folders earlier Strata installs wrote into the user's settings file (``installs``);
-* app        the desktop app's install folder, which the Terminal shares: ``<components>/../install`` (Windows
+* bundled    a bundled install's folder, shared with the tools: ``<components>/../install`` (Windows
              ``%LOCALAPPDATA%\\Strata\\install``, Linux and Mac ``$XDG_DATA_HOME/strata/install``, default ``~/.local/share/strata/install``).
-             The app's own settings file (``app-settings.json`` beside it) names its data folder and installs.
+             Its settings file (``app-settings.json`` beside it) names its data folder and installs.
 
-The desktop app itself (it sets STRATA_SETTINGS_FILE) never adopts an older command-line install, so for it only the explicit place, its
-own install folder and its own settings file count. Everything here is read-only: nothing is created, copied or moved.
+A bundled install (it sets STRATA_SETTINGS_FILE) never adopts an older checkout install, so for it only the explicit place,
+its own install folder and its own settings file count. Everything here is read-only: nothing is created, copied or moved.
 
-The data folder (models, packs, mtp) is found the same way: the person's own setting first, then the app's data folder, then a
+The data folder (models, packs, mtp) is found the same way: the person's own setting first, then the bundled install's, then a
 ``Documents/Strata`` folder that holds models, then the default beside the install. A model that is installed tells where it really is
 (its run config names its files), which beats all of these.
 """
@@ -47,22 +46,22 @@ def components_dir(environ=None, *, windows: bool | None = None, home: Path | No
 
 
 def app_install_dir(environ=None, *, windows: bool | None = None, home: Path | None = None) -> Path:
-    """The install folder the desktop app uses and the Terminal shares (beside the components folder)."""
+    """The folder a bundled install lives in, beside the components folder."""
     return components_dir(environ, windows=windows, home=home).parent / "install"
 
 
 def app_settings_file(environ=None, *, windows: bool | None = None, home: Path | None = None) -> Path:
-    """The desktop app's own settings file (control-runtime.mjs: beside its components folder)."""
+    """A bundled install's own settings file: beside its components folder."""
     return components_dir(environ, windows=windows, home=home).parent / "app-settings.json"
 
 
 def in_app_mode(environ=None) -> bool:
-    """True inside the desktop app's own processes: they set STRATA_SETTINGS_FILE and never adopt an older install."""
+    """True inside a bundled install's own processes: they set STRATA_SETTINGS_FILE and never adopt an older install."""
     return bool((os.environ if environ is None else environ).get("STRATA_SETTINGS_FILE"))
 
 
 def documents_dirs(environ=None, *, windows: bool | None = None, home: Path | None = None) -> list[Path]:
-    """The person's Documents folder(s): where the desktop app keeps ``Strata`` by default (Windows may redirect Documents to OneDrive)."""
+    """The person's Documents folder(s): where a bundled install puts ``Strata`` by default (Windows may redirect Documents to OneDrive)."""
     environ = os.environ if environ is None else environ
     home = _home(home)
     out: list[Path] = []
@@ -121,7 +120,7 @@ def _installs_in(settings: dict) -> list[Path]:
 
 
 def own_settings_file(environ=None, *, windows: bool | None = None, home: Path | None = None) -> Path:
-    """The settings file this process uses: the app's (STRATA_SETTINGS_FILE), else the command-line Strata's (%APPDATA% / ~/.config)."""
+    """The settings file this process uses: a bundled install's (STRATA_SETTINGS_FILE), else this checkout's (%APPDATA% / ~/.config)."""
     environ = os.environ if environ is None else environ
     if environ.get("STRATA_SETTINGS_FILE"):
         return Path(environ["STRATA_SETTINGS_FILE"])
@@ -194,8 +193,8 @@ def places(*, here: Path | None = None, explicit: str | os.PathLike | None = Non
 
 def find_install(*, here: Path | None = None, explicit: str | os.PathLike | None = None, environ=None, windows: bool | None = None,
                  home: Path | None = None) -> tuple[Path, str]:
-    """(the main install folder, how it was found). With no run config anywhere it is the app's folder, which is where a new model is
-    installed (``default``)."""
+    """(the main install folder, how it was found). With no run config anywhere it is the bundled install's folder,
+    which is where a new model is installed (``default``)."""
     found = places(here=here, explicit=explicit, environ=environ, windows=windows, home=home)
     if found:
         return found[0].path, found[0].source
@@ -239,9 +238,9 @@ def _write_data_dir(file: Path, folder: str, at: float) -> bool:
 
 
 def sync_data_dir(*, environ=None, windows: bool | None = None, home: Path | None = None) -> tuple[Path, str] | None:
-    """One models folder for the Terminal and the desktop app. The Terminal's settings file and the app's (``app-settings.json``) each name
-    a data folder; when they disagree the one changed last wins and the other file is updated. Nothing is moved. Returns (folder, source of
-    the winner) or None when neither names one. The app's own processes never call this (the app syncs from its host)."""
+    """One models folder for a checkout install and a bundled one. Their settings files (this one's, and ``app-settings.json``)
+    each name a data folder; when they disagree the one changed last wins and the other file is updated. Nothing is moved.
+    Returns (folder, source of the winner) or None when neither names one. A bundled install never calls this."""
     environ = os.environ if environ is None else environ
     if in_app_mode(environ):
         return None
@@ -275,8 +274,8 @@ def data_dir_choices(*, environ=None, windows: bool | None = None, home: Path | 
 
 
 def data_dir(default: Path, *, environ=None, windows: bool | None = None, home: Path | None = None) -> tuple[Path, str]:
-    """(the data folder, source). Of the Terminal's own setting and the app's folder the one changed last wins (the other file is brought up
-    to date); then a ``Documents/Strata`` that holds models; else `default`."""
+    """(the data folder, source). Of this install's own setting and a bundled install's folder the one changed last wins (the
+    other file is brought up to date); then a ``Documents/Strata`` that holds models; else `default`."""
     sync_data_dir(environ=environ, windows=windows, home=home)
     choices = data_dir_choices(environ=environ, windows=windows, home=home)
     for path, source in choices:
@@ -383,7 +382,7 @@ def data_dir_of(fp: Footprint) -> Path | None:
 
 def prepared_beside(gguf: Path) -> dict:
     """What was already prepared for a model file that sits in ``<data>/Models/<tag>/`` (or ``<data>/models/<tag>/``): its pack, the draft
-    layer and the picture reader, found by the layout setup and the desktop app both use. Reads only; absent items are None."""
+    layer and the picture reader, found by the layout setup and a bundled install both use. Reads only; absent items are None."""
     gguf = Path(gguf)
     folder = gguf.parent
     out: dict = {"data_dir": None, "pack": None, "mtp": None, "mmproj": None}

@@ -1,7 +1,6 @@
 """The Mac's model rules: which packs a Mac can run, whether one stays resident or streams its experts from the SSD, the
-Metal defaults of a run config. ONE definition, read by metal/setup_mac.py (a Mac that builds the engine itself), by setup.py's
-Control mode (the app and the Terminal on a Mac: model files only, the engine is a component) and by tools/strata_mcp.py (the
-model list, the fit words and the recommendation both show). Pure: nothing here downloads, builds or starts anything.
+Metal defaults of a run config. ONE definition, read by the picture-default tests (tools/test_picture_defaults.py).
+Pure: nothing here downloads, builds or starts anything.
 
 Unified memory: a Mac has one pool. Metal keeps a share of it resident (GPU_SHARE; on a big Mac the memory less what macOS and
 its file cache keep), a pack that does not fit streams its experts from the SSD (the engine decides by itself).
@@ -66,8 +65,8 @@ MAC_ABOUT = {"Q2_0": "2-bit, the fastest", "IQ3_XXS": "3-bit i-quant, better qua
              "Gyro-S": "agentionai's trellis experts, the smallest (58 GB download, the n-gram table is inside it)",
              "Gyro-M": "agentionai's trellis experts, about IQ3_XXS quality in less memory (92 GB download)"}
 TESTED_CONTEXT = 32768     # needles and the KL harness ran to 32K on the Mac
-# Below this much unified memory the app says a model does not fit (a Mac this small was never run: 32 GB is the smallest that was).
-# The Terminal keeps its rule of recommending and never forcing: the person can still pick one there.
+# Below this much unified memory a model is said not to fit (a Mac this small was never run: 32 GB is the smallest that was).
+# The rule is to recommend, never to force: the person can still pick a bigger pack.
 MIN_STREAM_RAM_GB = 16.0
 
 
@@ -106,8 +105,8 @@ def macos_tuple(ver: str) -> tuple:
 
 
 def mac_problems(info: dict, need_compiler: bool = True) -> list[str]:
-    """What stops the setup on this Mac (each with what to do). The app brings a ready-made engine and compiles nothing:
-    need_compiler=False leaves the Command Line Tools out."""
+    """What stops the setup on this Mac (each with what to do). need_compiler=False leaves the Command Line Tools
+    out of the check."""
     p = []
     if not info["arm64"]:
         p.append(f"this Mac has an Intel CPU ({info['chip']}): the Metal engine needs Apple Silicon (M1 or newer)")

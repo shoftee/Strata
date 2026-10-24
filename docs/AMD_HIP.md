@@ -1,7 +1,7 @@
 # AMD Radeon: the HIP backend (gfx1100, gfx1101, gfx1200, gfx1201, gfx1030)
 
 Strata runs on AMD Radeon cards through its HIP backend, the same engine as on NVIDIA compiled for AMD. This page
-covers the build on Linux (on Windows a ready-made engine, see [Windows](#windows)) for the RX 7900 XT / XTX (RDNA3, gfx1100) and the
+covers the build on Linux (on Windows setup does not build it, see [Windows](#windows)) for the RX 7900 XT / XTX (RDNA3, gfx1100) and the
 RX 9070 / 9070 XT / Radeon AI PRO R9700 (RDNA4, gfx1201; see [RDNA4](#rdna4-gfx1201)). The RX 7800 XT / 7700 XT
 (gfx1101) and the RX 9060 XT (gfx1200) were validated by their owners (see [Community-validated
 cards](#community-validated-cards)); the RX 6800 / 6900 series (RDNA2, gfx1030) builds and runs too, reported by a community machine and not yet validated by the maintainers (see [RDNA2](#rdna2-gfx1030)). Setup chooses it by itself on a PC with no NVIDIA card Strata can use (`--backend hip` on a PC with both); the
@@ -63,73 +63,63 @@ the kernel's amdgpu driver (no ROCm install needed):
 
 The rest of setup is the same as on NVIDIA: the model download, the start script, the server.
 
-## Ready-made packages (0.2.3)
+## Engine builds
 
-The 0.2.3 release carries one AMD engine package per card family. The Terminal one-liner and `strata update` pick the package whose
-GPU code covers the card; the full installers carry one package each. Any app installer also works: install it, press **Update engine**
-in Settings (or run `strata update`) and the matching package downloads.
+setup compiles the HIP engine for the card it found, for the architectures its ROCm supports. A build carries the
+engine, the CPU picture reader and the GPU picture reader (`strata-vision-hip`) for the architectures it was built for,
+and the rocBLAS and hipBLASLt kernel data for them only. A build whose GPU code does not cover the card is refused with
+one line that names the card family ("This build of Strata is for AMD RX 9000 cards. This computer has an AMD RX 7000
+card ..."). `STRATA_HIP_ARCHS` is the list to build for (`;`-separated), and
+`tools\hip\build_windows.bat` defaults to gfx1100, gfx1101, gfx1102, gfx1151, gfx1200, gfx1201 and gfx1030.
 
-| Package (variant) | OS | GPU code inside | ROCm | Installer |
-| --- | --- | --- | --- | --- |
-| `rx9070` | Windows | gfx1200, gfx1201 | 10.2.0a20260930 (TheRock) | `Strata-0.2.3-windows-hip.exe` |
-| `rdna3` | Windows | gfx1100, gfx1101, gfx1102, gfx1151 | 10.2.0a20260930 | `Strata-0.2.3-windows-hip-rdna3.exe` |
-| `rdna2` (0.2.2) | Windows | gfx1030, gfx1031 | 10.2.0a20260930 | no installer of its own: any app installer, then Update engine |
-| `rx9070` | Linux | gfx1200, gfx1201 | 7.10.0a20251120 (`gfx120X-all` wheels) | `Strata-0.2.3-linux-amd-rx9070.AppImage` |
-| `rx7900` | Linux | gfx1100, gfx1101, gfx1102 | 7.10.0a20251120 (`gfx110X-dgpu` wheels) | `Strata-0.2.3-linux-amd-rx7900.AppImage` |
-| `halo` | Linux | gfx1151 | 7.14.1 (TheRock) | `Strata-0.2.3-linux-amd-strixhalo.AppImage` |
-| `rx6000` (0.2.2) | Linux | gfx1030, gfx1031 | 7.13.0a20260515 (`gfx103X-all` wheels) | no installer of its own: any app installer, then Update engine |
+A build for the RX 7000 / RX 9000 / Strix Halo chips has no gfx1030 code, and an RX 6000 build has nothing else: on
+Windows build one with `STRATA_HIP_ARCHS="gfx1030;gfx1031" tools\hip\build_windows.bat`. Why setup's ROCm version
+differs per card: each GPU family has its own TheRock wheel index holding its own range of versions, the RX 6000
+index starts at 7.13 and has no 7.10 (#1103), and the 7.10 wheel segfaults on a Strix Halo with kernel 7.2.8 (#1267),
+so setup takes 7.14 for gfx1151, 7.13 for gfx1030 / gfx1031 and 7.10 for the rest; it falls back to the newest wheel
+the index still offers, and `STRATA_ROCM_VERSION` forces one exact version.
 
-`rdna3` and `halo` were added to the release after the first upload (feed sequence 101). Why the split: on Windows one ROCm 10.2 library
-set holds the kernels of every listed architecture, so RX 7000 and Strix Halo share a package. The Linux 7.10 wheels hold one chip family
-per library set, and 7.10 crashes in the HSA runtime on a Strix Halo with a new kernel (#1267), so Linux Strix Halo has its own package on 7.14.1.
+**The RX 6000 series (gfx1030 / gfx1031, RX 6800 / 6900 / 6700 XT) is built, not tested on a real RX 6000 card.** It is
+a niche, opt-in path that runs the plain kernels: RDNA2 has no matrix cores, so none of the WMMA paths, the gfx12
+prompt defaults or the 780M prompt set apply (they are chosen by the card's architecture, `src/core/arch_defaults.cpp`),
+and hipBLASLt ships no gfx1030 kernels, so there is no tuning table and the dense matrix products use plain hipBLAS.
+The [RDNA2 section](#rdna2-gfx1030) has what community owners measured with engines built from source. Please report a
+run on an RX 6000 card with the end of `strata-<model>.log`.
 
-Each package carries the engine, the CPU picture reader and the GPU picture reader (`strata-vision-hip`) for the same architectures, and
-the rocBLAS and hipBLASLt kernel data for them only. A package whose GPU code does not cover the card is refused with one line that
-names the card family ("This build of Strata is for AMD RX 9000 cards. This computer has an AMD RX 7000 card ...").
-**The RX 6000 series (gfx1030 / gfx1031, RX 6800 / 6900 / 6700 XT) has its own package from 0.2.2** (below). The 0.2.1 packages have no code for it,
-and the app said so plainly instead of naming a build to ask for.
-
-**RX 6000 package (0.2.2): built, not tested on a real RX 6000 card.** `rx6000` on Linux (ROCm 7.13.0a20260515, the `gfx103X-all` wheels
-setup already uses for these cards) and `rdna2` on Windows (ROCm 10.2.0a20260930), each with the code for gfx1030 and gfx1031 only. It is a niche,
-opt-in build: the feed offers it to a PC whose card reports gfx1030 or gfx1031 and to no other (a PC with an RX 7000 / 9000 card beside an RX 6000
-one keeps the package it always had), and the RX 7000 / 9000 / Strix Halo packages are unchanged. It runs the plain
-kernels: RDNA2 has no matrix cores, so none of the WMMA paths, the gfx12 prompt defaults or the 780M prompt set apply (they are chosen by the card's
-architecture, `src/core/arch_defaults.cpp`), and hipBLASLt ships no gfx1030 kernels, so there is no tuning table and the dense matrix products use plain
-hipBLAS. Linux build: `VARIANT=rx6000 packaging/build_hip_linux.sh`; Windows: `STRATA_HIP_ARCHS="gfx1030;gfx1031" tools\hip\build_windows.bat`, then
-`package_engine.py --variant rdna2`. The [RDNA2 section](#rdna2-gfx1030) has what community owners measured with engines built from source. Please
-report a run on an RX 6000 card with the end of `strata-<model>.log`.
-
-**Automatic card (0.2.1):** with no card named in the model's settings, the engine start asks the package's `strata-device --list-devices`
-and skips cards the package has no code for and integrated chips (a mini PC's Radeon 760M / 890M is HIP's device 0) while a card of its own
+**Automatic card (0.2.1):** with no card named in the model's settings, the engine start asks `strata-device --list-devices`
+and skips cards this build has no code for and integrated chips (a mini PC's Radeon 760M / 890M is HIP's device 0) while a card of its own
 can run. Device 0 stays the choice when it is already such a card. When none of the computer's cards can run, the start stops
 with one line that names the cards found and what the engine is built for. `HIP_VISIBLE_DEVICES`, a `"gpu"` in the settings file or `hip_ordinal` is never overridden.
 
 What was run on real hardware:
 
-- **Checked on every package** (no RX 7000 or Strix Halo card involved): it builds and links; every library the binaries import is in the
-  package or belongs to the OS (`packaging/binary_deps.py`); `package_engine.py --verify` passes; the GPU code inside each binary and
-  library lists exactly the architectures above (`llvm-objdump --offloading`); `strata --version` runs in a clean environment (on Windows with the package's `rocm\bin` folder on PATH, which Control sets); on a
-  gfx1201 card the Linux `halo` and `rx7900` builds refuse to start with the plain message (the Windows `rdna3` build was not run on an RX 9000 card: there is no Windows AMD machine); the feed picks the right package for each
-  architecture (`tests/terminal/test_release_matrix.py`).
-- **Not run by the maintainers:** any model on an RX 7000 card (gfx1100-1102) or a Strix Halo (gfx1151), on either OS. The maintainers have
-  no such card.
-- **Run by other people:** an RX 7900 XTX on Windows 11 ran the earlier ready-made Windows engine (0.1.40; [report #1173](../bench/results/2026-10-06-community-rx-7900-xtx/README.md));
-  RX 7900 XTX, XT and GRE owners ran Linux builds ([COMMUNITY.md](../bench/results/COMMUNITY.md)); Strix Halo owners ran Linux builds made from source
-  (ROCm 7.14 line). Nobody has reported a Strix Halo on Windows, or the packaged `halo` and `rdna3` engines.
-- **Tuning tables (0.2.1):** each AMD package carries the hipBLASLt tuning tables of `tools/hip` that match the hipBLASLt it bundles, as
-  `tuning/<arch>-hipblaslt-<version>.txt` (listed and hashed in the package manifest), and records that version as `hipblaslt_version` in its
-  BUILD.json. Windows `rx9070` has the gfx1201 table, Windows `rdna3` the gfx1100 and gfx1151 ones (all hipBLASLt 1.5.0), Linux `rx7900` the
-  gfx1100 one (1.2.0), Linux `halo` the gfx1151 one (1.4.1). The RX 6000 packages (`rx6000`, `rdna2`, 0.2.2) have none, because hipBLASLt has no gfx1030 / gfx1031 kernels. Linux `rx9070` has none: its wheels carry hipBLASLt 1.2.0 and no table in `tools/hip`
-  is for that version (a table calibrated for it on an R9700 read prompts about 1% faster and decode 2% slower, so none is shipped).
-  The engine start picks the table for the card and uses it only when the package's hipBLASLt version is the table's; otherwise it logs
-  why and the dense matrix products stay on plain hipBLAS. **A table changes which GEMM algorithm runs the prompt, so the rounding differs: the
-  answers are not bit-identical to plain hipBLAS** (first-token KL 0.016 on an R9700, see below). Packaged engines therefore use the table by
-  default only on Strix Halo (gfx1151), where a community A/B measured prompts 2.11x faster with it (251 to 529 tokens/s); every other card
-  uses it only when you ask: `STRATA_HIPBLASLT_TABLE=on` (or `"hipblaslt_table": true` in the run config) uses it, `off` never does (on Strix
-  Halo too), and the start log
-  says which table was taken or why none was (`hipBLASLt tuning table: ...`). A `STRATA_HIPBLASLT_TUNING` you set yourself is always kept.
-  A source build is unchanged (see [Tuning table](#tuning-table)). Testers on Strix Halo and RX 7000 cards: please send that log line and a
-  prompt-speed run with `on` and `off`.
+- **Checked for every card family** (no RX 7000 or Strix Halo card involved): it builds and links; every library the
+  binaries import is next to them or belongs to the OS; the GPU code inside each binary and library lists exactly the
+  architectures it claims (`llvm-objdump --offloading`); `strata --version` runs in a clean environment (on Windows with
+  the engine's `rocm\bin` folder on PATH, which setup arranges); on a gfx1201 card the gfx1100-line and gfx1151 builds
+  refuse to start with the plain message (a Windows AMD build has not been run on an RX 9000 card: there is no Windows
+  AMD machine here).
+- **Not run by the maintainers:** any model on an RX 7000 card (gfx1100-1102) or a Strix Halo (gfx1151), on either OS.
+  The maintainers have no such card.
+- **Run by other people:** an RX 7900 XTX on Windows 11 ran a Windows engine built for it (0.1.40;
+  [#1173](https://github.com/Niko1221/Strata/issues/1173)); RX 7900 XTX, XT and GRE owners ran Linux builds on their
+  cards; Strix Halo owners ran Linux builds made from source
+  (ROCm 7.14 line). Nobody has reported a Strix Halo on Windows.
+- **Tuning tables (0.2.1):** an engine can carry the hipBLASLt tuning tables of `tools/hip` that match the hipBLASLt it
+  was built against, as `tuning/<arch>-hipblaslt-<version>.txt` next to the engine, and its BUILD.json records that
+  version as `hipblaslt_version`. setup looks in the engine's own `tuning/` first, then in `tools/hip` of this checkout
+  (the file name says which hipBLASLt it was calibrated on). The RX 6000 series has none, because hipBLASLt ships no
+  gfx1030 / gfx1031 kernels, and a gfx1201 card on hipBLASLt 1.2.0 has none either: a table calibrated for it on an
+  R9700 read prompts about 1% faster and decode 2% slower, so none is kept. The engine start picks the table for the
+  card and uses it only when the hipBLASLt it runs on is the version the table was calibrated on; otherwise it logs why
+  and the dense matrix products stay on plain hipBLAS. **A table changes which GEMM algorithm runs the prompt, so the
+  rounding differs: the answers are not bit-identical to plain hipBLAS** (first-token KL 0.016 on an R9700, see below).
+  The table is on by default only on Strix Halo (gfx1151), where a community A/B measured prompts 2.11x faster with it
+  (251 to 529 tokens/s); every other card uses it only when you ask: `STRATA_HIPBLASLT_TABLE=on` (or
+  `"hipblaslt_table": true` in the run config) uses it, `off` never does (on Strix Halo too), and the start log says
+  which table was taken or why none was (`hipBLASLt tuning table: ...`). A `STRATA_HIPBLASLT_TUNING` you set yourself is
+  always kept (see [Tuning table](#tuning-table)). Testers on Strix Halo and RX 7000 cards: please send that log line
+  and a prompt-speed run with `on` and `off`.
 
 Please report a run on an RX 7000 card or a Strix Halo (card, driver, OS, the end of `strata-<model>.log`).
 
@@ -144,9 +134,10 @@ On a PC with no NVIDIA card Strata can use, the AMD card is chosen by itself; wi
   install, no compiler, no admin rights.
 - **Detection:** setup reads the display adapters Windows lists (their PCI ids; the VRAM size from the display
   driver's registry entry). An integrated Radeon is listed as not supported, except the Ryzen AI Max "Strix Halo" (Radeon 8060S / 8050S / 8040S, gfx1151: [STRIX_HALO.md](STRIX_HALO.md)); a Strix Point (890M / 880M, gfx1150), Krackan (860M / 840M, gfx1152) or Phoenix / Hawk Point (780M / 760M, gfx1103) Radeon is named as what it is and not supported (on Linux the 780M / 760M has an opt-in build: [RADEON_780M.md](RADEON_780M.md)).
-- **Engine (0.2.0 and later):** the installers and `strata update` use the engine packages in [Ready-made packages](#ready-made-packages-020); the zip described next is the START-HERE route of 0.1.x.
-- **Engine (START-HERE, 0.1.x):** the ready-made engine package for your card, fetched from the signed update feed (releases from 0.2 carry no flat `strata-windows-x64-hip.zip`; that zip is what `build_windows.bat` makes for a self-build) (built by `tools\hip\build_windows.bat`
-  for gfx1100, gfx1101, gfx1102, gfx1200, gfx1201, gfx1030 and, from 0.1.40, gfx1151 (Strix Halo, unvalidated on Windows)) goes into `engine\`. It carries the ROCm libraries the
+- **Engine:** setup does not compile the AMD engine on Windows. Build it with `tools\hip\build_windows.bat`
+  ([Building it yourself](#building-it-yourself)), which writes `dist\strata-windows-x64-hip.zip`; unpack that into
+  `engine\` and setup starts it. It is built for gfx1100, gfx1101, gfx1102, gfx1200, gfx1201, gfx1030 and gfx1151
+  (Strix Halo, unvalidated on Windows). It carries the ROCm libraries the
   engine loads (`engine\rocm\bin`: the HIP runtime, hipBLAS / rocBLAS / hipBLASLt with their kernels for these cards,
   amd_comgr and the Microsoft C++ runtime; ROCm 10.2.0a20260930 from AMD's TheRock builds, licenses in
   `engine\rocm\licenses`). The HIP runtime works through the AMD driver's own components, so the driver is the one
@@ -180,7 +171,7 @@ correct answers; ctest 42 of 46. The maintainers have no Windows AMD card: the r
 and checked there on the Ryzen CPU's integrated Radeon (gfx1036, a test build of the same tree): with only the zip's
 libraries on the PATH, `strata-device` lists the card and a hipBLAS BF16 GEMM matches the CPU; the HIP ctest passes
 52 of 56, the 4 failures the same as on the RX 9070 XT (`hip_handoff`, and three tests that need a pack fixture).
-The ready-made zip itself has not run a model on a discrete card yet - please report.
+A Windows build has not run a model on a discrete card yet - please report.
 
 **Reporting a Windows AMD run** (an issue, or on #325): your card and driver version (AMD Software > System), then
 
@@ -194,7 +185,7 @@ speed lines the server window prints for a first answer.
 
 **Building it yourself:** `tools\hip\build_windows.bat` (Visual Studio 2022 Build Tools with the C++ workload, Python,
 git; no admin, no AMD GPU) installs ROCm from AMD's TheRock wheels into `.rocm-win`, builds, and packages
-`dist\strata-windows-x64-hip.zip`; `START-HERE.bat --backend hip --prebuilt dist\` installs that one.
+`dist\strata-windows-x64-hip.zip`; unpack it into `engine\` and `START-HERE.bat --backend hip` starts that engine.
 `tools\hip\build_windows.bat tests` also builds the HIP tests (`ctest` in `build-hip-win`, with
 `.rocm-win\Lib\site-packages\_rocm_sdk_devel\bin` on the PATH). `STRATA_HIP_ARCHS` picks other architectures.
 
@@ -347,8 +338,7 @@ machine). Windows HIP: the doorbell kernels fence their store (#697), and the sh
 
 **The shared-expert stream fork (`STRATA_SH_STREAM`):** it is off by default on HIP, except for the gfx1151 table, and
 that default stays. The measurements disagree by platform. 2x RX 6900 XT on Linux (#1272): turning it off costs 5-13%
-of decode (one card 47.5 / 46.9 / 48.3 -> 50.5 / 48.5 / 51.3 tok/s with it on). RX 6800 on Windows (#816,
-`bench/results/2026-10-04-community-rx-6800-windows`): on was 12-22% slower. 4x R9700: fork off was 13-45% faster.
+of decode (one card 47.5 / 46.9 / 48.3 -> 50.5 / 48.5 / 51.3 tok/s with it on). RX 6800 on Windows (#816): on was 12-22% slower. 4x R9700: fork off was 13-45% faster.
 Linux RX 6000 users can try `STRATA_SH_STREAM=1`; the output is identical either way. Since the same card goes
 both ways on different PCs, `./setup.sh --calibrate` measures it on yours (off against on, a restart each) and writes
 `STRATA_SH_STREAM=1` into the config's `"env"` only when it wins by more than 3%; a later calibration that finds it no
@@ -390,7 +380,7 @@ existing scorer. On one RX 7900 XTX / 7950X3D / ROCm 10.0.0, three paired runs o
 fresh one-token request time by 10.45% at 130,978 prompt tokens and 22.64% at 239,906; one same-binary current-main
 pair measured 12.85% and 21.71%. Cached follow-ups did not show a repeatable large gain, and a two-task coding pilot
 was 3.27% slower overall. This is opt-in, not a general coding-speed recommendation. The
-[report, per-run data and standalone score/ID check](../bench/results/2026-10-11-gfx1100-qsa-scores/README.md)
+[report, per-run data and standalone score/ID check](https://github.com/Niko1221/Strata/pull/1825)
 give the settings, exact-parity checks and limits. `STRATA_SCORES_THREAD_TRACE=1` prints an engagement line.
 
 ## Deep contexts: the prompt's top-k selection (0.1.45, #1749)
@@ -588,6 +578,20 @@ an RX 9070 XT 16 GB and a Radeon AI PRO R9700 32 GB (both gfx1201), a Ryzen 9 39
     alone is inert there too (4K 1,247 against 1,243 tok/s, 8K 1,330 against 1,321, medians of 3 starts, i.e. noise).
 - **Known:** rarely (about 1 start in 10) a HIP run's greedy output differs from another start's at some token, on
   one card or two and on engine 0.1.29 as well; not yet explained.
+- **Windows: the driver resets (VIDEO_ENGINE_TIMEOUT_DETECTED / screen flicker / the engine dies mid-answer).**
+  Windows gives a GPU about 2 seconds to answer; when a graphics card does not, it resets the driver (a TDR): the
+  screen flickers, the engine dies, and the Event Viewer shows `VIDEO_ENGINE_TIMEOUT_DETECTED` (#613, with #579 and
+  #541 the same on Linux). Engine 0.1.39 and newer say "the GPU stopped responding" in the log. It was seen with KV
+  streaming on (`--kv-resident 32768`, which setup turns on from 64K context) while reading a long prompt on a
+  gfx1201 card. Two switches in the `"env"` block of `strata-<model>.json` say what is happening, one at a time:
+  `STRATA_PF_STEP_SYNC=1` makes the prompt path wait for the GPU after each step and log any step over 250 ms, so
+  the log names the step (slower: use it to diagnose, then take it out); `STRATA_KV_HOST_DMA=1` stops any GPU kernel
+  from writing the RAM copy of the K/V during a prompt - it is copied by DMA instead, the same answers. What helps:
+  a context that fits the VRAM without KV streaming (setup's 32K choice, or take `--kv-resident` and its number out
+  of `"args"`), and a smaller prompt chunk (`--prefill 512`: less work per GPU launch, prompts read more slowly).
+  Windows' own 2-second limit can be raised with a `TdrDelay` DWORD of `10` under
+  `HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\GraphicsDrivers` (a restart; Strata changes no Windows setting
+  itself) - it hides the symptom and does not fix a GPU that has really hung.
 - **Pictures:** the card's reader (`strata-vision-hip`) is measured on an R9700 (gfx1201): 57 ms for a 260-token picture and 0.40 s for a
   972-token one, against 3.13 s and 14.1 s on the CPU reader (EPYC, 32 threads); the embeddings agree with the CPU reader's (cosine mean 0.99985). It keeps
   about 1.4 GiB of VRAM (+1,470 MiB on the R9700). A test picture (red circle, blue square, green triangle, the text "STRATA 42") was answered correctly with both readers, and the
@@ -706,7 +710,7 @@ run it; the report below is from a community machine: an RX 6900 XT 16 GB (gfx10
   N = 10240, T = 7313, K = 2560). `STRATA_HIP_PROMPT_F16=1` (opt-in, off by default; the engine prints a tip on gfx103x) runs the 16-bit prompt GEMMs FP16 in and out;
   unset is the old path. `STRATA_DBG_NAN=1` also counts the non-finite FP16 outputs (a sum past 65504). The output is not bit-identical to it (an FP16 rounding of each GEMM's output replaces the BF16 rounding of
   the BF16 GEMMs' activations); what the distribution check showed and did not show is in
-  [bench/results/2026-10-04-rdna2-fp16-prompt](../bench/results/2026-10-04-rdna2-fp16-prompt/README.md). FP16 ends at
+  [#1006](https://github.com/Niko1221/Strata/pull/1006). FP16 ends at
   65504: `STRATA_F16_RANGE=1` prints, per prompt, the largest value that entered or left FP16 and how many were beyond
   the range (466K tokens there: outputs peak at 410, activations at 112, none beyond; the image writers saturate, a GEMM
   output beyond the range would be Inf and is what the counter is for). Measured on a
@@ -722,7 +726,7 @@ run it; the report below is from a community machine: an RX 6900 XT 16 GB (gfx10
   start-up run per token count with a barrier timeout decides where it is resident, and one `strata hc:` line per card
   says so. On 2x RX 6900 XT (ROCm 10.0, layer split): the read 1.35-2.10x, ms per verify window -4.2 % / -2.8 % at
   4K / 32K (6 rounds), not bit-identical (as close to a double-accumulation reference as the default read):
-  [bench/results/2026-10-12-hc-persist-gfx1030](../bench/results/2026-10-12-hc-persist-gfx1030/README.md). Other
+  [#375](https://github.com/Niko1221/Strata/pull/375). Other
   RDNA cards are untested; the `strata hc:` line and a `STRATA_DECODE_TIMING` run from one are welcome. Not offered on gfx11 and
   gfx12 (RDNA3, RDNA4): the barrier timeout needs `s_memrealtime`, which gfx1100 and gfx1200 / gfx1201 do not have, and an R9700 (#2226 thread) measured the
   read +0.7 % / +1.0 % per window slower than the default one; the start-up line says so. A barrier that times out at run time
@@ -776,7 +780,7 @@ run it; the report below is from a community machine: an RX 6900 XT 16 GB (gfx10
   146), 8,874 tokens 11,978 -> 11,459 ms (the 682-token tail chunk's projections, `hc read` 1,200 -> 898); a
   1,108-token prompt did not change (3,391 -> 3,395 ms): its GDN time fell 598 -> 201 ms and the whole saving
   reappeared as `wait copy`, the experts' PCIe transfer, which bounds that prompt. Per-run lines and the tuner's
-  summary: [bench/results/2026-10-05-rdna2-rocblas-table](../bench/results/2026-10-05-rdna2-rocblas-table/README.md). Decode does not use these GEMMs and is unchanged. See [Tuning
+  summary: [#835](https://github.com/Niko1221/Strata/pull/835). Decode does not use these GEMMs and is unchanged. See [Tuning
   table](#tuning-table) for making a table for another rocBLAS build.
 - **QSA block scores on the FP32 tiled scorer (`STRATA_SELECT_SIMT=1`, opt-in, as on CUDA below sm_80):** without
   matrix cores the prompt path's QSA selection scores every (query, KV block) pair on the warp kernel, the one prompt
@@ -788,15 +792,15 @@ run it; the report below is from a community machine: an RX 6900 XT 16 GB (gfx10
   (0.1.40.3, IQ3_S, `--kv int8 --kv-resident 32768`, two cold starts per arm, ABBA) a 128K-token prompt reads 1,735 ->
   1,861 and 1,727 -> 1,858 tok/s (+7.4%), 32K +0.8%; decode is not affected (the text changes with the scores' order,
   so its speed is not compared). Measurements:
-  [bench/results/2026-10-07-rdna2-qsa-select-simt](../bench/results/2026-10-07-rdna2-qsa-select-simt/README.md).
+  [#742](https://github.com/Niko1221/Strata/pull/742).
 - **File-tier cache rule on gfx906 (`STRATA_FILE_CACHE_OLD_RULE`):** on an MI50 ROCm queues are suspended while the kernel reclaims around the process's HMM-tracked arena (#1752, KevinX8: stalls, prompt 46 -> 360 tok/s once the file tier stops churning the page cache). The gfx906 backend therefore keeps the old rule (the file cache is used only when the room left is at least the bytes read from the files); other HIP cards keep the current rule. `STRATA_FILE_CACHE_OLD_RULE=1` forces the old rule on any Linux build, `=0` the current one.
-- **Windows** (the report above): setup's ready-made Windows engine 0.1.39 runs the RX 6800 beside a 780M iGPU
+- **Windows** (the report above): the Windows engine of 0.1.39 runs the RX 6800 beside a 780M iGPU
   (HIP numbers the RX 6800 1; setup points the engine at it), and `tools/hip/build_windows.bat` with
   `STRATA_HIP_ARCHS=gfx1030` builds a working engine from the `gfx103X-all` 10.2.0a20260930 wheels.
 - **gfx1031** (RX 6700 XT, #524): setup knows it (the `gfx103X-all` wheels, unvalidated); its reporter runs it daily
   on one card. More reports: an RX 6700 XT 12 GB run as gfx1030 on ROCm 7.2.4 (#1027: IQ2_XS, decode 30-32 tok/s, prompt about 300 tok/s, 6 of 6
   needles), and an RX 6800M 12 GB on Windows with a self-built engine (#915, #1078: Q2_0, decode 9-27 tok/s, prompt 50-114 tok/s; the
-  experts stream from disk with 31 GB of RAM). The ready-made Windows zip has no gfx1031 code unless it is built with it: `STRATA_HIP_ARCHS=gfx1031`
+  experts stream from disk with 31 GB of RAM). A Windows build has no gfx1031 code unless it is built with it: `STRATA_HIP_ARCHS=gfx1031`
   in `tools\hip\build_windows.bat` (the default list has it from 0.1.40.2 on).
 - **gfx1150** (Radeon 890M, Ryzen AI 9 HX PRO 370, Strix Point, #1217): builds and runs from 0.1.40.2 as an unvalidated target (CMake warns; the
   device code already covers it: the WMMA guards and `gfx_arch_is_gfx11_wmma()` include it). One community machine: MINISFORUM N5 PRO, 96 GB DDR5-5600, GTT
@@ -804,7 +808,7 @@ run it; the report below is from a community machine: an RX 6900 XT 16 GB (gfx10
   tool calls work, decode 15-19 tok/s, the HIP ctest passes apart from tests that need files a public checkout lacks.
   Prompts read at about 125-130 tok/s on plain hipBLAS and 1.5-1.7x faster with `tools/hip/gfx1150-hipblaslt-100401.txt` (ROCm 7.14.1's
   hipBLASLt; 3.6K tokens 124 -> 216 tok/s, 7K 130 -> 226 tok/s, decode unchanged):
-  [bench/results/2026-10-07-community-gfx1150](../bench/results/2026-10-07-community-gfx1150/README.md).
+  [#1217](https://github.com/Niko1221/Strata/pull/1217).
   Setup does not install for it yet (an integrated Radeon other than Strix Halo is named and not supported): build by hand with `-DCMAKE_HIP_ARCHITECTURES=gfx1150`
   and point `STRATA_HIPBLASLT_TUNING` at the table yourself.
 - **gfx1152** (Radeon 860M / 840M, Ryzen AI 300 "Krackan", #1625): in CMake's unvalidated list like gfx1150, so
@@ -910,22 +914,22 @@ CASES=$(awk 'NR>2 {printf " --case %s,%s,%s,%s,%s", $1, $5, $2, $3, $4}' tools/h
 
 The file's second line names the architecture and version (`STRATA_HIPBLASLT_TUNING_V1 gfx1201 100401`); save it
 as `tools/hip/<arch>-hipblaslt-<version>.txt` for setup, or point `STRATA_HIPBLASLT_TUNING` at it. Compare the
-prompt speed with and without it before keeping it. For an engine package, `packaging/stage_tuning.py` (Linux builds) and
-`tools/hip/package_windows.py` copy the tables that match the bundled hipBLASLt into the package's `tuning/` folder.
+prompt speed with and without it before keeping it. `tools/hip/package_windows.py` copies the tables that match the
+hipBLASLt a Windows build bundles into its `tuning/` folder, next to the engine.
 
-**Measured for 0.2.1 on a Radeon AI PRO R9700 (gfx1201), the Linux `rx9070` package 0.1.45.3, Q2_0, hipBLASLt 1.2.0, one card, the
+**Measured for 0.2.1 on a Radeon AI PRO R9700 (gfx1201), engine 0.1.45.3 built for the RX 9000 line on Linux, Q2_0, hipBLASLt 1.2.0, one card, the
 box to itself.** A 1.2.0 table (32 rows, `tune_hipblaslt` over the gfx1201 100500 table's cases) against plain hipBLAS, 6 interleaved pairs
 with a fresh engine per run and a second plain arm as the noise arm: prompt 4K 2,302 vs 2,119 tok/s and 20K 2,671 vs 2,507 (5 and 6 of 6 pairs
 faster, but a plain run alone lands on either of two speeds, 1,970 or 2,290 at 4K, so the medians mix modes; inside one mode the table is
 +0.5% at 4K and +1% at 20K), decode 91.2 vs 93.2 tok/s (-2.1%, 0 of 6 pairs faster). Not bit-identical: the final residual of a 4K and a
 20K prompt differs, a 48-token greedy answer after the 20K prompt differs, and the first-token KL against plain is 0.0157 mean, 0.0716 max over
 24 prompts of 1.5K-24K tokens (plain against plain: 0 and 0.00004; top-1 token the same 24 of 24; 24-token answers equal 1 of 6). That is why
-no gfx1201 table is shipped for hipBLASLt 1.2.0 and why packaged engines use a table only when asked.
+no gfx1201 table is kept for hipBLASLt 1.2.0 and why a card other than Strix Halo uses a table only when asked.
 
 Shipped tables:
 
 - `gfx1100-hipblaslt-100100.txt`, `gfx1100-hipblaslt-100200.txt`: RX 7900 XTX.
-- `gfx1100-hipblaslt-100401.txt`: RX 7900 XTX, calibrated with the packaged ROCm 10.0.0
+- `gfx1100-hipblaslt-100401.txt`: RX 7900 XTX, calibrated with ROCm 10.0.0
   (`rocm/dev-ubuntu-24.04:10.0.0-full`, hipBLASLt 1.4.1) on a Ryzen 7 9800X3D, over the 26 dense GEMM
   geometries of the shipped gfx1100 table. Without it, that stack reads a prompt through plain hipBLAS: on
   Swift 1.5 IQ3_XXS at 262144 ctx, fresh-prompt prefill measured 682 -> 1,038 tok/s at 1.7K tokens and
@@ -976,7 +980,7 @@ Shipped tables:
   the passes. Every row beats plain hipBLAS, 1.55-22.6x per GEMM (geometric mean 4.5x), and `STRATA_HIPBLASLT_VERBOSE=1` reported
   no fallbacks over prompts of 28-7,880 tokens. Setup does not use it (it does not install for gfx1150): point
   `STRATA_HIPBLASLT_TUNING` at it. Measurements and the per-row timings:
-  [bench/results/2026-10-07-community-gfx1150](../bench/results/2026-10-07-community-gfx1150/README.md).
+  [#1217](https://github.com/Niko1221/Strata/pull/1217).
 - `gfx1103-hipblaslt-100401.txt`: Radeon 780M (gfx1103, RDNA3, 12 CUs, unified memory), calibrated with ROCm 10.1
   (`rocm/dev-ubuntu-24.04:10.1.0-full`, hipBLASLt 1.4.1, version number 100401) and the engine's 32 MiB workspace. The
   16 dense GEMM geometries a Qwen3.8-Flash-Next prompt logs on the card at T = 64, 128, ..., 16384: 144 cases, two
@@ -990,7 +994,7 @@ Shipped tables:
   `hip_prefill_hcd_exact_parity` skips, because the table picks no 1176 / 1177 for the HC down GEMM (the skip the
   gfx1150 table gets too). Setup installs for gfx1103 only with `STRATA_EXPERIMENTAL_GFX1103=1` and then uses the
   table when the installed hipBLASLt reports 1.4.1. Measurements:
-  [bench/results/2026-10-12-community-gfx1103](../bench/results/2026-10-12-community-gfx1103/README.md).
+  [#1423](https://github.com/Niko1221/Strata/pull/1423).
 
 Calibrated on my PC and kept in this checkout, not shipped: `gfx1201-hipblaslt-100401.txt`, a Radeon AI PRO
 R9700 (gfx1201, 32 GB, 1002:7551) on a Ryzen 9 9950X3D with 62 GiB RAM, CachyOS (kernel 7.3.0-rc6-1-cachyos-rc,

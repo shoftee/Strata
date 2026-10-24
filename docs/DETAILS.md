@@ -2,7 +2,7 @@
 
 The technical side of Strata: every measured number, the API, images, all settings and how the engine works.
 New here? Start with the [README](../README.md); installing step by step is in [INSTALL.md](INSTALL.md), the models in
-[MODELS.md](MODELS.md), common problems in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+[MODELS.md](MODELS.md), common problems in [Troubleshooting](#troubleshooting) at the bottom.
 
 > **On this page:** [Speed](#speed-measured) · [Other GPUs](#other-gpus-estimated) · [Which model?](#which-model) ·
 > [Requirements](#before-you-start) · [Windows](#windows) · [Linux](#linux) · [API](#using-it) ·
@@ -39,7 +39,7 @@ below are 0.1.26's.
 | **Coder** | 656 | 1,583 | 2,177 | 2,236 | 2,208 | 1,034** |
 | **IQ3_S** (AMD RX 7900 XTX, gfx1100) | 760 | 1,275 | 1,641 | 1,594 | 1,494 | - |
 
-Engine 0.1.26; `bench/results/2026-09-29-speed-0126`. The AMD RX 7900 XTX row: engine 0.1.38 on a ROCm
+Engine 0.1.26. The AMD RX 7900 XTX row: engine 0.1.38 on a ROCm
 10.2 nightly with a tuned gfx1100 hipBLASLt-100500 table (upstream as [#755](https://github.com/Niko1221/Strata/pull/755)),
 the median of 3 clean cells per tier
 (Ryzen 9 7900X, 96 GB; 1K-128K one-shot runs, 256 generated tokens,
@@ -65,9 +65,7 @@ packaged-ROCm numbers, 32K-128K ahead). † not measured again: 0.1.14.
 
 Output speed depends on the text as well: speculative decoding runs faster when more of the drafted tokens are
 accepted, so a different answer to the same prompt moves it by several percent. Run back to back on the 4K prompt,
-0.1.14 writes 88.5 tokens/s and 0.1.12 85.7. The numbers before 0.1.13 (prompts about half as fast):
-[`bench/results/2026-09-24-final`](../bench/results/2026-09-24-final/matrix.md); these:
-[`bench/results/2026-09-28-speed-0114`](../bench/results/2026-09-28-speed-0114/README.md).
+0.1.14 writes 88.5 tokens/s and 0.1.12 85.7. The numbers before 0.1.13 (prompts about half as fast) are the older runs.
 
 IQ3_XXS and IQ3_S at 262K are not measured: with their 43 / 50 GB of experts, a 260K-token context brings a 64 GB PC
 to its memory limit by setup's estimate (the experts + the context's KV cache + 24 GB), so setup recommends up to 128K
@@ -88,7 +86,6 @@ Under WSL2 the driver caps what `cudaHostAlloc` may pin at about 1 GiB, so the K
 **4-bit KV cache (engine 0.1.8, optional):** `START-HERE.bat --setup` asks above 8K context (or pass `--kv q4_0`). It
 halves the KV cache's memory with a Hadamard rotation before 4-bit rounding (PR #21), about 4% faster at 128K, but it
 is measurably less precise on long documents (perplexity +8-12%; needle tests still pass). 8-bit stays the default.
-Details: [`bench/results/2026-09-27-kv-q4`](../bench/results/2026-09-27-kv-q4/README.md).
 
 **Hybrid K8V4 KV cache (engine 0.1.25, optional, PR #120):** `--kv k8v4` (`START-HERE.bat --setup --kv k8v4`) keeps
 the keys at 8 bits and stores the values as rotated 4-bit: 23% less KV memory than 8-bit, so more experts fit in
@@ -205,15 +202,13 @@ other ~18 GB), a 32 GB PC with a 12-16 GB GPU the Coder; IQ3_XXS on a 32 GB PC s
   the next tick, so the window an expert turns GPU-resident does not depend on timing. The pick runs on the host thread
   (`STRATA_ADAPT_PICK_INLINE=1`, one round per window); `STRATA_ADAPT_ASYNC_BATCH=N` posts at most N copies per tick (default 0
   = all; 16 measured slower). Every K/V grow and the `VRAM` command land the round in flight first. RTX 3090 + Ryzen 5 5600X,
-  cold prompts: x1.07-1.11 decode, 12 of 12 prompts faster
-  ([report](../bench/results/2026-10-11-community-rtx3090-5600x-arena-async/README.md)).
+  cold prompts: x1.07-1.11 decode, 12 of 12 prompts faster ([report](https://github.com/Niko1221/Strata/pull/1863)).
 - **Pin by need** (`STRATA_PIN_BY_NEED=1`, opt-in, the arena on one GPU): Windows page-locks about half the RAM at most (the
   WDDM shared budget), so the arena registers its first ~30 GiB and the layers past it get no PCIe share. With the variable
   every blob gets a page-aligned stride (+0.15 % RAM) and the expert profile's non-GPU-resident experts are registered by rank
   instead, up to `STRATA_ARENA_PIN_GIB` (29 by default on Windows). `STRATA_PCIE_MIN1=1` sends one miss over PCIe as soon as a
   layer has two (the share otherwise rounds to 0 at 1-2 misses). RTX 3090 + Ryzen 5 5600X: prompt read +5-7 % at 56K-117K
-  tokens; decode level alone, +2-3 % with `--adapt-async 1` and `--pcie-frac 0.6`
-  ([report](../bench/results/2026-10-11-community-rtx3090-5600x-arena-pin-by-need/README.md)).
+  tokens; decode level alone, +2-3 % with `--adapt-async 1` and `--pcie-frac 0.6`.
 - **Pinned-memory headroom** (Windows CUDA, on by default; `STRATA_PIN_RESERVE_MIB=N`, `0` = off, sets it on any OS): the arena registers
   slice by slice until the driver refuses one, and on a 64 GB PC that left no page-locked memory at all for the few small buffers the
   engine allocates after it (the verify window's staging: `verify: mapped staging allocation failed`, exit 1, on Swift 1.5 IQ2_XS). The
@@ -257,7 +252,7 @@ are left alone. Unset or `0` keeps the previous behavior. On one 32 GB Windows 1
 and a Thunderbolt RTX 3090, IQ2_XS with `--mmap-experts --layer-split 12 --trim-stage-weights` raised median available
 RAM from 0.51 to 12.19 GiB across 1K/4K/16K prompt trials, with 3.7-4.4% lower prefill throughput. It did not reduce
 committed memory or physical SSD reads. This is a working-set hint, not an unmap or a guarantee that the OS drops
-its file cache. See the [configuration, measurements and limits](../bench/results/2026-10-04-windows-mapped-release/README.md).
+its file cache. The configuration, measurements and limits: [#467](https://github.com/Niko1221/Strata/pull/467).
 
 **Low-RAM mode without `experts.bin` (engine 0.1.31):** for the native packs (IQ2_XS, IQ3_XXS, IQ3_S, the Coder, Swift,
 Q2_0 packed by `tools/iq_pack.py`; not the canonical Q2_0 pack setup makes for AVX-512 CPUs) the mapped mode no longer
@@ -394,7 +389,10 @@ move on a Threadripper PRO 3975WX + R9700 (14.5 ms, +0.4%, 5 pairs); no case rea
   `--mtp-hnorm stream` (one norm per stream, as llama.cpp's MTP graph) and `--mtp-draft-vocab FILE` (a token subset
   of your own instead of `<mtp>/draft_vocab.bin`).
 - Elsewhere: HIP `STRATA_DENSE_MMQ=1` and `STRATA_HIP_ADAPT_KERNEL_COPY=1` in [AMD_HIP.md](AMD_HIP.md#model-and-serving-configuration);
-  `STRATA_KEEP_EMPTY_TURNS=1` and `STRATA_TOPK_STREAM=0` in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+  `STRATA_KEEP_EMPTY_TURNS=1` keeps an earlier answer that came back empty in the chat history (the server leaves
+  those out so the next reply does not copy them, #843); `STRATA_TOPK_STREAM=0` runs the register kernel of the
+  prompt's top-k selection, which a Turing card does above ~90K tokens (#743, and on HIP:
+  [AMD_HIP.md](AMD_HIP.md#deep-contexts-the-prompts-top-k-selection)).
 
 
 **Read-ahead at start (Linux):** the weights, the native dense matrices, the GPU cache's fill from the profile, the
@@ -439,10 +437,9 @@ first; the next layer's experts stream over PCIe while the current layer's atten
 whole chunk at once; unpinned experts are copied by helper threads. Measured on the RTX 5070 12 GB, 64 GB RAM,
 32K-token prompt: Q2_0 572 -> 1,290 tokens/s, IQ3_S 383 -> 1,208. Through the server (Q2_0, 128K context): 999 tokens
 353 -> 438 tokens/s, 6,927 tokens 529 -> 1,077, 28,584 tokens 584 -> 1,249. Output speed is unchanged. Needles 5/5
-(1K-262K). Details and the quality check:
-[`bench/results/2026-09-28-prefill-speed`](../bench/results/2026-09-28-prefill-speed/README.md). Existing installs
-switch to `--prefill auto` the next time START-HERE / setup.sh starts them. The raw numbers:
-[`bench/results/`](../bench/results/). The [paper](paper/Strata-Paper.pdf) explains every number.
+(1K-262K). Details and the quality check are in the 0.1.13 release notes. Existing installs
+switch to `--prefill auto` the next time START-HERE / setup.sh starts them. The [paper](paper/Strata-Paper.pdf)
+explains every number.
 
 ## Other GPUs (estimated)
 
@@ -543,10 +540,10 @@ What the first start installs: in this folder `.venv/`, `engine/` and `third_par
 elsewhere) finds them and sets itself up the same way. The place is remembered per user (`%APPDATA%\Strata\settings.json`,
 `~/.config/strata/settings.json`); `--data-dir` chooses another. Installs from before 0.1.16 are moved there by the next
 start (a rename on the same drive; files on another drive are used where they are).
-Python 3.12 if you have none (for your user account, no admin), a private Python environment, NVIDIA's CUDA libraries
-(from pip, ~0.4 GB), the ready-made Strata engine for RTX 20/30/40/50, the model and the MTP draft layer. If no
-ready-made engine fits your PC, it offers to install the build tools (Visual Studio Build Tools + CUDA Toolkit on
-Windows, `build-essential` + CUDA on Ubuntu) and compiles the engine for your GPU (asks first; 20-40 minutes once).
+Python 3.12 if you have none (for your user account, no admin), a private Python environment, the Strata engine
+(compiled for your GPU from this source), the model and the MTP draft layer. If the build tools are missing it offers
+to install them (Visual Studio Build Tools + CUDA Toolkit on Windows, `build-essential` + CUDA on Ubuntu; asks
+first; 20-40 minutes once).
 
 ---
 
@@ -765,7 +762,7 @@ about 256 MiB it adds `LOW: requests may stall; add --vram-reserve-mib N` with t
 
 Measured on an RTX 4080 SUPER 32 GB, IQ3_S, engine 0.1.39, `--max-context 1048576` (yarn factor 4), fresh
 43,969 / 45,670 / 47,956-token prompts with 200 generated each, one engine start per row (the rest of the
-configuration is the one in `bench/results/2026-10-04-community-rtx-4080s-iq3s`):
+configuration is the one reported with [#642](https://github.com/Niko1221/Strata/pull/642)):
 
 | expert cache | slots | VRAM free at start | decode tok/s |
 | --- | ---: | --- | --- |
@@ -915,8 +912,8 @@ print(r.choices[0].message.content)
   `strata-<model>.json` sets it for every request; a request's own value wins, and `0` means no budget. Off by default;
   Anthropic's `"thinking": {"budget_tokens": N}` chooses the level, as above, and since 0.1.45 is also the budget (a
   `reasoning_budget_tokens` in the same request wins).
-- **max_tokens counts the thinking, so the answer keeps its room (0.1.45).** A client that caps the whole reply (the
-  desktop agent's harness sends `max_completion_tokens: 8192` on every request) and a task the model thinks long about
+- **max_tokens counts the thinking, so the answer keeps its room (0.1.45).** A client that caps the whole reply (an
+  agent harness that sends `max_completion_tokens: 8192` with every request is the common case) and a task the model thinks long about
   used to be cut off in the middle of the thinking, with no answer. Now a request with thinking on, no budget of its
   own and `max_tokens` of 1,024 or more gets one: the thinking is wrapped up when only a quarter of the cap (at least
   512 tokens) is left, and the model answers in that room (8,192: thinking up to 6,144, answer 2,048). Requests without
@@ -1680,38 +1677,15 @@ unmeasured: all the runs above are text.
 
 ---
 
-## Manage Strata from your AI assistant (MCP server)
-
-`tools/strata_mcp.py` is an MCP server for Claude Code, Claude Desktop, Cursor, VS Code, Codex and other assistants.
-Once it is added, you can ask your assistant "install Strata for this PC", "start Strata" or "is Strata running?".
-In Claude Code, add it with:
-
-```bash
-claude mcp add strata -- python C:\Users\you\Strata\tools\strata_mcp.py
-```
-
-It has eight tools: status (the running model, what is installed, the hardware, a recommended size), the model
-list, install, start, stop, logs, a speed test, and connection settings for other apps.
-
-Install runs `setup.py` with `--yes` in the background. Before it downloads anything, it shows the plan and waits
-for your OK. Start and stop work like the run scripts and the server's own unload. The MCP server only ends
-processes it started itself. It uses only Python's standard library, so it works before `.venv` exists.
-
-The config snippets for every client, the tool arguments and the safety rules are in
-[docs/MCP_SERVER.md](MCP_SERVER.md). This is the opposite direction from
-[Tools from MCP servers](#tools-from-mcp-servers) above, where the Strata model calls *your* MCP tools.
-
----
-
 ## Images (vision)
 
 (Qwen3.6-35B-A3B reads pictures the same way, with its own `mmproj-F16.gguf`: [QWEN36.md](QWEN36.md).)
 
 The model has a vision encoder: [`mmproj-Qwen3.8-Flash-Next-BF16.gguf`](https://huggingface.co/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF)
 (0.9 GB, a 27-layer ViT plus the projector into the language model). Pictures are **on by default** wherever a model can read
-them. The app, `strata launch` and setup use one rule for the reader: the **CPU reader under 24 GB** of graphics memory (nothing is
+them. Setup uses one rule for the reader: the **CPU reader under 24 GB** of graphics memory (nothing is
 taken from the card's memory, so the experts keep their room) and the **graphics card's reader from 24 GB**, on NVIDIA and AMD
-cards; a Mac reads on its GPU (Metal) whatever its memory. You can switch pictures off (`--vision no`, or "No" in the app and in `strata launch`) or pick the reader per model
+cards; a Mac reads on its GPU (Metal) whatever its memory. You can switch pictures off (`--vision no`) or pick the reader per model
 (`--vision gpu` or `--vision cpu`). The setup downloads the encoder and puts a small helper (`strata-vision`, from llama.cpp's
 `mtmd` library) beside the engine; it adds it to your start script. Nothing else changes. Where a reader is missing, pictures
 stay off and the screen says so: the Intel Arc engine has none yet. On AMD the card's reader is `strata-vision-hip`, a second program in the engine package; if it cannot start, the server
@@ -1768,7 +1742,7 @@ differ by about 1% anyway.
 **A spare GPU for the encoder (0.1.33, #408):** with a card the engine doesn't use, add `"cuda_device": 2` (numbered
 like `nvidia-smi`) to the `"vision"` section of `strata-<model>.json`: the encoder then runs on that card alone. Lower
 `--vram-reserve-mib` in `"args"` to 700 as well, so the engine's cards keep that VRAM for the expert cache. The
-encoder's card needs code in the ready-made encoder (RTX 20/30/40/50).
+encoder's card needs code in the encoder: it covers the supported cards.
 
 **The encoder only while there are pictures (opt-in, `"elastic": true` in the `"vision"` section, with the config's
 `"vram_elastic": true`; [VRAM_ELASTIC.md](VRAM_ELASTIC.md#the-image-encoder-on-demand)):** the GPU encoder does not start
@@ -2075,7 +2049,7 @@ the pairs in which the switched arm won). They are here so you can try them on y
   with the verifier spinning for its signal (#1975). The warm-up runs and synchronizes one no-op host callback before
   constructing the pool; swap selection, per-layer callbacks and residency updates stay unchanged. On an RTX 5090 /
   Ryzen 9 9950X, a paired 4K three-prompt test averaged 142.82 -> 207.75 tok/s. Other GPUs and drivers remain untested;
-  see the [reproducer, settings and limitations](../bench/results/2026-10-11-rtx-5090-callback-affinity/README.md).
+  see [#1975](https://github.com/Niko1221/Strata/pull/1975).
 - **`STRATA_ADAPT_SIGNAL=host`: the overlap's per-layer "landed" signal as a host function** (the 0.1.43 way). From 0.1.43.1 the default is a
   4-byte stream-ordered copy into pinned memory, which needs no driver callback thread: on a 20-core desktop (RTX 3060) the host
   functions still cost ~7 ms per window with the thread started early, because the pool's workers occupy every other CPU.
@@ -2170,8 +2144,8 @@ processors": 8 workers on logical processors 1 to 8 (four cores, both threads) r
 2, 4, ..., 16 read 94 GB/s, and the default 15 workers on 2, 4, ..., 30 read 146 GB/s (medians of three interleaved 10-second
 runs; 31 workers on 1 to 31 read 123 GB/s).
 
-**`--pool-cores LIST`** (or `STRATA_POOL_CORES=LIST`, or `"pool_cores": "2,4,6,8"` in the run config, or
-`strata launch --pool-cores 2,4,6,8`) pins the workers to exactly these logical processors, in this order. It is for people who
+**`--pool-cores LIST`** (or `STRATA_POOL_CORES=LIST`, or `"pool_cores": "2,4,6,8"` in the run config) pins the workers to
+exactly these logical processors, in this order. It is for people who
 want to choose the cores themselves (leave some for other programs, use one chiplet, test a layout); the default is what was
 measured. The list is numbers, ranges and `first-last:step`: `0,2,4,6`, `2-14:2`. The numbers are the ones Task Manager and
 `lscpu` show. The worker count is the length of the list; `--pool-workers N` takes the first N entries (more workers than
@@ -2292,7 +2266,7 @@ model's.
 
 **Measured here** (Q2_0, fixed experts, 2,557 teacher-forced tokens of code, a document and a chat): the top-1 token
 changes at 10% of positions, mean KL from the stock model 0.063 nats (max 4.1), perplexity +15% on code, +2.3% on
-the document, +0.4% on the chat. Details: `bench/results/2026-09-27-esp/`.
+the document, +0.4% on the chat.
 
 ---
 
@@ -2323,8 +2297,8 @@ the document, +0.4% on the chat. Details: `bench/results/2026-09-27-esp/`.
 | `the engine said nothing for ... s during the request` or `... did not finish the request after it was stopped (STOP)` | Issue #481: the engine and the server lost step (the engine waits for its next command, the server for the request's end; GPU at 0 %, nothing in the log). The server ends the engine after 300 s without a line from it during a request (while a prompt is read: each chunk may take three times the previous one's time, the first one up to its tokens at 50 tok/s more), the request ends with an error and the next request starts the engine again. `"engine_silence_s": 600` in `strata-<model>.json` sets the time (0 = wait forever, as before). If you see it, please add the end of the engine log to #481. |
 | `the engine said nothing for ... s and used no CPU or disk in that time (frozen ...)` | Issue #1317: a quicker version of the check above for an engine that is not slow but stopped (a deadlock inside a CUDA call, a driver stall): after 90 s without a line, if the engine process has also used no CPU time and moved no disk bytes in that time, the server ends it and the next request starts it again. An engine that is silent but still working is never ended by this check, the server prints one note (`... but is still working; it is not ended`) and leaves it to `engine_silence_s`. `STRATA_ENGINE_STALL_S=180` sets the time, `0` turns the check off (it needs `psutil`, which setup installs). |
 | `out of memory: cudaFuncSetAttribute` in the log (IQ3_XXS, long prompt) | Fixed in engine 0.1.15: CUDA loaded a kernel's code when it was first needed, and mid-prompt there was no VRAM left for it. Run `START-HERE.bat` (Windows) or `./setup.sh` (Linux) once to update. |
-| The desktop app or the Terminal says it could not find an engine, or that a model needs a newer engine; a Mac says an app is "damaged" | [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-desktop-app-and-the-terminal). |
-| Anything else | The engine log is `strata-<model>.log` in this folder. In the app: Settings, Engine, Diagnostics, View logs, Save logs. In the Terminal: `strata doctor`. |
+| The setup says it could not find an engine, or that a model needs a newer engine | Run the setup again: it compiles an engine for this PC. |
+| Anything else | The engine log is `strata-<model>.log` in this folder; the server window shows the last lines of any start error. |
 
 ---
 

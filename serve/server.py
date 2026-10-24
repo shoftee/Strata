@@ -103,7 +103,7 @@ def popen(what: str, args: list, role: str = "engine", **kw):
             raise OSError(f"Windows blocked {what} ({args[0]}): Smart App Control, or an application-control policy, does "
                           "not let a program that is not signed run. Turn Smart App Control off (Windows Security > App "
                           "& browser control > Smart App Control settings), or - for the image encoder only - run setup "
-                          "with --vision no (see docs/TROUBLESHOOTING.md)") from e
+                          "with --vision no (the troubleshooting table in docs/DETAILS.md)") from e
         raise
 
 
@@ -1101,7 +1101,7 @@ class StrataEngine:
         self.reused = 0                  # RESUME: prompt tokens not read again (a client takes them out of the work)
         self.silent_note = None
         self.last_err = None
-        try:                            # a ready-made engine's BUILD.json says its version
+        try:                            # the engine folder's BUILD.json says its version
             self.info["version"] = json.loads((Path(exe).parent / "BUILD.json").read_text()).get("version")
         except (OSError, ValueError):
             self.info["version"] = None
@@ -3163,7 +3163,7 @@ def card_roles_lines(cfg: dict) -> list[str]:
             out.append("[strata] every graphics card is Off: " + gpu_roles.CPU_ONLY_LINE)
             return out
         raise SystemExit("[strata] every graphics card is set to Off, and this engine cannot start without one. Turn a card on "
-                         "(Main or Helper) in the app or with strata launch --gpu-roles.")
+                         "(Main or Helper) with \"gpu_roles\" in the run config, or let setup choose again.")
     word = {"main": "Main", "helper": "Helper", "off": "Off"}
     out.append("[strata] card roles: " + ", ".join(f"{word[r]} GPU {i}" for r in ("main", "helper", "off")
                                                     for i in sorted(roles) if roles[i] == r) + " (numbers as nvidia-smi gives them)")
@@ -3281,10 +3281,10 @@ def engine_args(cfg: dict) -> list[str]:
     layer_split_value)."""
     args = list(cfg["args"])
     # "user_args" (strata_control/user_args.py): the options the person set by hand, over the generated ones at every start,
-    # so a setup run or the app rewriting "args" cannot undo them (#3216 #3215 #3270)
+    # so a setup run or the web page rewriting "args" cannot undo them (#3216 #3215 #3270)
     if cfg.get("user_args"):
         args = user_args.merge(args, cfg["user_args"])
-    # "drafting": auto | mtp | dflash2 | off (strata_control/drafting.py; the Models screen and `strata launch --drafting` write it): which drafter
+    # "drafting": auto | mtp | dflash2 | off (strata_control/drafting.py; setup and the run config write it): which drafter
     # guesses ahead. A choice that cannot be applied starts the MTP and says why in the engine's /metrics ("drafting_note").
     if cfg.get("drafting") is not None or drafting.suggest(drafting_card_class()) != "mtp":
         shaped = {**cfg, "args": args}
@@ -3295,7 +3295,7 @@ def engine_args(cfg: dict) -> list[str]:
             print(f"[strata] drafting: {decision.note}", flush=True)
         elif decision.flags:
             print(f"[strata] drafting: DFlash2 ({' '.join(decision.flags[:2])})", flush=True)
-    # "mtp": false (the Models settings, `strata launch --mtp off`, or by hand): no draft layer, whatever the args say.  A setup run
+    # "mtp": false (setup's answer or by hand): no draft layer, whatever the args say.  A setup run
     # that writes --mtp back into the args cannot undo it, because this is applied at every start.
     if draft_layer.is_off(cfg):
         args, removed = draft_layer.strip(args)
@@ -5860,7 +5860,7 @@ def add_carry(carry: dict, last: dict) -> dict:
 def answer_speed(last: dict, generated: int, wall_s: float | None = None) -> float | None:
     """The one definition of "answer speed": every token the model produced (thinking and answer, the tokens it kept - not
     the MTP drafts it threw away) over the decode time, first generated token to last.  The engine's DONE line holds both
-    numbers; /metrics (`decode_tok_s`), the timings (`predicted_per_second`), the Terminal monitor and the app all use them.
+    numbers; /metrics (`decode_tok_s`), the timings (`predicted_per_second`), the Monitor and the web page all use them.
     Only an engine that sent no DONE falls back to the server's own clock from the first token, and a clock younger than
     RATE_MIN_SPAN_S says nothing (it printed 1000000 tok/s for a one-token reply).  Prompt reading is never in it."""
     produced, decode_ms = last.get("generated"), last.get("decode_ms")
@@ -6696,8 +6696,8 @@ def make_handler(svc: Service):
                 return
             if path == "/v1/telemetry":
                 if self._authorized_telemetry():
-                    from strata_cli.client import normalize_legacy
-                    snapshot = normalize_legacy(svc.metrics(), svc.v1_status())
+                    from serve import legacy_status
+                    snapshot = legacy_status.normalize_legacy(svc.metrics(), svc.v1_status())
                     snapshot["source"] = "server-v1"
                     snapshot["work"]["slots_requested"] = getattr(svc, "requested_slots", None)
                     # Keep /metrics' established slot shape intact; enrich only this versioned contract.
@@ -7336,7 +7336,7 @@ def make_handler(svc: Service):
                                  "trusted_origins)")
 
         def _settings(self):
-            # They change what every client gets, so only the app's own page may set them
+            # They change what every client gets, so only the server's own page may set them
             body = self._body()
             if not self._own_page("settings can be changed"):
                 return
@@ -8154,7 +8154,7 @@ SAMPLING_ALIASES = {"repeat_penalty": "repetition_penalty", "repeat_last_n": "pe
 
 def apply_saved_tuning(cfg: dict, *, say=None) -> dict:
     """The run config with the active saved tuning for its choices put on top (strata_control/presets.py), with no measurement.
-    Every start path runs this (the Terminal, `runtime start`, the app's load, a restart of the app, an unload and a load), so the
+    Every start path runs this (setup's start, the server loading a config, a restart, an unload and a load), so the
     tuning is applied every time and never re-measured. A tune's own worker sets STRATA_NO_PRESET so that it measures the
     configuration it was given. Never fails a start: a store that cannot be read means the configuration as it is."""
     if os.environ.get("STRATA_NO_PRESET"):

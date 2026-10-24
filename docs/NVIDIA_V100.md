@@ -1,8 +1,8 @@
 # NVIDIA Tesla V100 / Titan V (Volta, sm_70): the community build
 
-Strata's ready-made engine and the support matrix start at compute capability 7.5 (RTX 20). A V100 (7.0) runs the same
-engine compiled for it, through the experimental build that issue #236 added. It is **community-tested, not part of the
-supported cards**: no ready-made engine is published for it and the numbers below come from one machine.
+Strata's support matrix starts at compute capability 7.5 (RTX 20). A V100 (7.0) runs the same engine compiled for
+it, through the experimental build that issue #236 added. It is **community-tested, not part of the supported
+cards**, and the numbers below come from one machine.
 
 ## Build
 
@@ -14,8 +14,8 @@ cmake -S . -B build -DSTRATA_ENABLE_CUDA=ON -DSTRATA_BUILD_TESTS=OFF \
 cmake --build build --target strata -j
 ```
 
-Setup does the same by itself for a model on a V100 (the experimental CUDA 12 engine, in `engine-cuda12/`: ready-made
-on Windows, compiled with a CUDA 12.x toolkit on Linux; [OLDER_GPUS.md](OLDER_GPUS.md)). For a PC with a V100 and a newer card, a build for both architectures (`-DCMAKE_CUDA_ARCHITECTURES="70;86"`) is the
+Setup does the same by itself for a model on a V100 (the experimental CUDA 12 engine, compiled with a CUDA 12.x
+toolkit and kept in `engine-cuda12/`; [OLDER_GPUS.md](OLDER_GPUS.md)). For a PC with a V100 and a newer card, a build for both architectures (`-DCMAKE_CUDA_ARCHITECTURES="70;86"`) is the
 natural choice (a community report in issue #509 ran an RTX 3080 beside a V100 that way; it was not repeated here). On the
 measuring PC a Quadro RTX 4000 (sm_75) sits beside the V100s and was hidden with `CUDA_VISIBLE_DEVICES` because the sm_70-only
 build has no code for it.
@@ -27,7 +27,7 @@ select "old" kernels everywhere: which kernel runs is decided per architecture w
 
 | Part of the prompt path | On sm_70 |
 | --- | --- |
-| MoE experts | opt-in (`STRATA_PF_WMMA=1`, only when every visible card is compute capability 7+; MMQ otherwise): `gemm_iq_f16_grouped`: a group of experts per launch on the FP16 tensor cores, the weights dequantized in shared memory (+10% prompt speed against MMQ's `dp4a` kernels, [bench](../bench/results/2026-10-07-v100-prompt-experts/README.md); FP16 activations instead of MMQ's q8_1, so the answers differ) |
+| MoE experts | opt-in (`STRATA_PF_WMMA=1`, only when every visible card is compute capability 7+; MMQ otherwise): `gemm_iq_f16_grouped`: a group of experts per launch on the FP16 tensor cores, the weights dequantized in shared memory (+10% prompt speed against MMQ's `dp4a` kernels,  FP16 activations instead of MMQ's q8_1, so the answers differ) |
 | Dense projections (dequantized weights) | FP16 tensor-core GEMMs (cuBLAS / CUTLASS `s884`) |
 | BF16 projections (hyper-connection, router, indexer, ...) | converted to FP16 and run on the FP16 tensor cores (#655, #540; `STRATA_BF16_TC=0`: cuBLAS BF16, an FP32 SIMT kernel on Volta) |
 | QSA attention for decode and verify windows (and prompts with `STRATA_PROMPT_ATTN_OLD=1`) | #540's kernel (fewer shuffles, bit-exact; `STRATA_ATTN_PRE75=0`: the one other cards run) |
@@ -41,8 +41,7 @@ select "old" kernels everywhere: which kernel runs is decided per architecture w
 | Dense 2-4 column GEMVs and the head | the interleaved `native_mmvq_il` with a Volta rows table (`STRATA_MMVQ_IL=0`: `native_mmvq`) |
 | Hyper-connection read, up projection | gfx906's latency-hidden up kernel (`STRATA_GR_FAST=0`: the plain one) |
 
-All three are bitwise the kernels they replace; on a V100-SXM2 they take a verify window's GPU work from 22.8 to 21.2 ms
-([bench/results/2026-10-07-v100-decode-kernels](../bench/results/2026-10-07-v100-decode-kernels/README.md)).
+All three are bitwise the kernels they replace; on a V100-SXM2 they take a verify window's GPU work from 22.8 to 21.2 ms.
 
 ## Measured
 
@@ -55,8 +54,8 @@ with and without the Volta attention kernel (`STRATA_PROMPT_ATTN_OLD=1`):
 | 28,650 | 1,063 | 1,251 |
 | 114,338 | 973 | 1,123 |
 
-Decode was 38-51 tok/s in every run and is not affected. The profile, the parity numbers, the needle test and the limits are in
-[bench/results/2026-10-03-v100-prompt-attn](../bench/results/2026-10-03-v100-prompt-attn/README.md).
+Decode was 38-51 tok/s in every run and is not affected. The profile, the parity numbers, the needle test and the limits
+are in [#540](https://github.com/Niko1221/Strata/pull/540).
 
 What the kernel does and does not guarantee: against an FP64 reference its error is about 2-3e-6 (output scale 3.6; the FP32 kernel it replaces: 2e-6; 5e-6 before the hi and lo halves got separate accumulator chains); 15 of 15
 needles were found; greedy output was identical on the 28,650- and 114,338-token prompts and differed late in the answer on the 7,194-token one (another
@@ -75,8 +74,8 @@ sm_80.
 ## Limits
 
 - A layer split over two V100 was not measured with this kernel. The cards work in turn on a single request, so a split adds expert-cache room, not prompt speed.
-- sm_60 (Pascal) is covered by the same flag, and community runs exist: two Tesla P40 with a layer split (#1028, bench
-  [2026-10-05-community-2x-p40](../bench/results/2026-10-05-community-2x-p40/README.md)), a Tesla P100 alone and with an RTX 2070 SUPER as
+- sm_60 (Pascal) is covered by the same flag, and community runs exist: two Tesla P40 with a layer split ([#1028](https://github.com/Niko1221/Strata/pull/1028)),
+  a Tesla P100 alone and with an RTX 2070 SUPER as
   the expert-helper card (#1069: 30.5 tok/s alone, 35.8-38.4 with the helper), and a V100 + P100 pair (#1079: +6-11% decode from 0.1.39 to
   0.1.40 with the P100 as helper cache). One reporter's numbers each; this page's own kernel measurements are V100 only.
 - Volta's tensor cores take FP16 only: a model's BF16 weights are converted, and a weight outside FP16's range would saturate (none did in

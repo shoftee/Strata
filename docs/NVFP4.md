@@ -5,7 +5,7 @@ blocks of E2M1 codes with four UE4M3 sub-block scales, plus one FP32 `weight_sca
 Everything else (attention, GDN, shared experts, routers, the head) stays in the formats the native path already
 reads. Measured on Windows 11, RTX 5090 (32 GB), Ryzen 9 9950X3D, 128 GB DDR5-5600.
 
-**The three NVFP4 versions in setup and the app.** `NVFP4` is "NVFP4 (Strata's version)", `NVFP4-NVIDIA` is "NVFP4
+**The three NVFP4 versions in setup.** `NVFP4` is "NVFP4 (Strata's version)", `NVFP4-NVIDIA` is "NVFP4
 (NVIDIA's version)", and `NVFP4-QAD` is "NVFP4 (NVIDIA, trained for FP4)" ([the short guide](MODELS.md#nvfp4)). All three
 read pictures, through the original model's picture reader file that setup downloads with them (see "Images" below and
 the FP4-Local section). The other sections of this page apply to all three unless they say otherwise.
@@ -116,7 +116,7 @@ Images: the packs keep Qwen's vision tower unquantized, so the original's image 
 (`--vision`; strata-vision opens the dense GGUF for the vocabulary). Checked on an RTX 5070 and an RTX 3060 against
 IQ3_XXS's answers on the same picture (a number in the picture read, two shapes with their colours and sides). The
 encoder on the GPU takes ~1.1 GiB of VRAM: on the 3060 at 8K context the cache held 1,293 experts with images against
-1,734 without. Pictures are on by default; setup and the app pick the CPU reader under 24 GB of graphics memory and the
+1,734 without. Pictures are on by default; setup picks the CPU reader under 24 GB of graphics memory and the
 GPU reader from 24 GB (`--vision cpu` / `--vision gpu` change it).
 
 ## Where the global scales go
@@ -245,7 +245,7 @@ table, the dense GGUF (no experts), the pack (experts written straight from the 
 about 110 GB of free disk beside the 102 GB download, which can be deleted afterwards. On a Threadripper PRO with the files
 on NVMe it took about 12 minutes.
 
-Measured on an RTX PRO 5000 72 GB (Blackwell), 128K context, int8 KV, every expert in VRAM (`tools/strata_bench.py`):
+Measured on an RTX PRO 5000 72 GB (Blackwell), 128K context, int8 KV, every expert in VRAM:
 decode 159 tokens/s (median of chat answers, 137-216), 4K prompt 3,981 tokens/s, 16K 4,813, 32K 4,916 (first token 6.6 s),
 agent session 151 tokens/s; the engine holds 69 GB of RAM beside 72 GB of VRAM. Quality is in the table below
 (`tools/quant_quality.py`, set v1, against Unsloth's Q8_0): top-1 90.5%, mean KL 0.085, perplexity 3.95 (Q8_0: 4.05).

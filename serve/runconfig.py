@@ -158,7 +158,7 @@ def apply(cfg: dict, changes: dict) -> tuple[dict, list[str]]:
             elif v is not None:
                 a += [flag, str(v)]
             new["args"] = a
-            mine = user_args.set_flag(user_args.capture(new), flag, v)   # a value set here is the person's: it survives setup and the app
+            mine = user_args.set_flag(user_args.capture(new), flag, v)   # a value set here is the person's: it survives setup
             if mine:
                 new[user_args.USER_KEY] = mine
             else:

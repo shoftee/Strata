@@ -2,8 +2,8 @@
 
 Owner rule: fixes are automatic defaults, users never set flags. A model that is a few hundred MiB short of one expert-cache slot
 (Gyro-M on an 8 GB Arc A750: "no VRAM is left for the expert cache, about 744 MiB more than this card has free") must start on its own
-with a smaller context, never be refused. Pure functions, no I/O: sycl/setup_intel.py (setup), strata_cli/launch (strata launch and the
-app's recommended context) import it.
+with a smaller context, never be refused. Pure functions, no I/O: sycl/setup_intel.py (setup) and setup.py, with the
+engine component of a bundled install, import it.
 
 The arithmetic (MiB), measured on the Arc A750 (8 GB, i915) with the SYCL engine of 0.2.2, Gyro-M and Gyro-S, 12 starts:
 

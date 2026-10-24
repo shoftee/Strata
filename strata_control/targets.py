@@ -1,7 +1,7 @@
 """Which OS and backend combinations the project commits to, and what this machine is.
 
 Pure and tiny on purpose: the engine resolver on the start path (engine_component.py) needs these answers, and the
-start path must not import the component fetcher (components.py) to get them.
+start path stays free of anything that installs or unpacks.
 """
 
 from __future__ import annotations

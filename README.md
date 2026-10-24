@@ -1,11 +1,9 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/host/public/brand/strata-lockup-dark.svg">
-    <img src="apps/host/public/brand/strata-lockup-light.svg" alt="Strata" width="380">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/strata-lockup-dark.svg">
+    <img src="docs/brand/strata-lockup-light.svg" alt="Strata" width="380">
   </picture>
 </p>
-
-<p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.de.md">Deutsch</a> · <a href="README.fr.md">Français</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a></p>
 
 <h3 align="center">Run a state-of-the-art model on your own gaming PC</h3>
 
@@ -25,7 +23,7 @@ Strata runs **[Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Nex
 normally needs a server, on a normal PC. It chats, writes code, reads pictures and works with your apps and coding
 agents. Your chats and files stay on your PC.
 
-**New here?** Check [what you need](#what-you-need), then [install the app](#option-a-the-strata-app).
+**New here?** Check [what you need](#what-you-need), then [install Strata](#install).
 
 - **Runs on a gaming PC.** 32 GB of RAM and graphics memory together is enough to start.
 - **Works with your tools.** It speaks the OpenAI and Anthropic APIs, so Claude Code, Codex CLI, OpenCode and other agents connect to it.
@@ -45,7 +43,7 @@ memory. More memory gives a bigger model or a faster one.
 
 | Your computer | Details |
 | --- | --- |
-| **NVIDIA** GeForce RTX 20, 30, 40, 50 series (12 GB or more) | Install the app or the Terminal. |
+| **NVIDIA** GeForce RTX 20, 30, 40, 50 series (12 GB or more) | Install it from source: [Install](#install). |
 | **AMD** Radeon RX 6800 and newer, Radeon AI PRO R9700 (12 GB or more) | [AMD cards](docs/AMD_HIP.md) |
 | **Intel** Arc | [Intel Arc](docs/INTEL_ARC.md), [Intel engine](docs/INTEL.md) |
 | **Apple Silicon Mac** (M1 or newer, macOS 15 or newer) | [Mac](docs/MAC.md) |
@@ -63,77 +61,43 @@ NVIDIA and AMD cards. Full list: [docs/INSTALL.md](docs/INSTALL.md#what-you-need
 
 ## Install
 
-Pick one option. They all start the same engine and use the same models.
-
-### Option A: the Strata app
-
-The easiest way. The app has the engine inside: install it, pick a model, chat. Download the file for your system and
-graphics card from the [releases page](https://github.com/Niko1221/Strata/releases/latest). Not sure which one? See the
-line under the table.
-
-| System | Your graphics card | File to download |
-| --- | --- | --- |
-| **Windows 10 / 11** | NVIDIA RTX, driver 580 or newer | [`Strata-0.2.3-windows-cuda13.exe`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-windows-cuda13.exe) |
-| | NVIDIA, older card or driver older than 580 | [`Strata-0.2.3-windows-cuda12.exe`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-windows-cuda12.exe) |
-| | AMD Radeon RX 9000 series or Radeon AI PRO R9700 | [`Strata-0.2.3-windows-hip.exe`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-windows-hip.exe) |
-| | AMD Radeon RX 7000 series or Ryzen AI Max (Strix Halo) | [`Strata-0.2.3-windows-hip-rdna3.exe`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-windows-hip-rdna3.exe) |
-| **Linux** | NVIDIA RTX, driver 580 or newer | [`Strata-0.2.3-linux-nvidia-cuda13.AppImage`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-linux-nvidia-cuda13.AppImage) |
-| | NVIDIA, older card or driver older than 580 | [`Strata-0.2.3-linux-nvidia-cuda12.AppImage`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-linux-nvidia-cuda12.AppImage) |
-| | AMD Radeon RX 9000 series or Radeon AI PRO R9700 | [`Strata-0.2.3-linux-amd-rx9070.AppImage`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-linux-amd-rx9070.AppImage) |
-| | AMD Radeon RX 7000 series | [`Strata-0.2.3-linux-amd-rx7900.AppImage`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-linux-amd-rx7900.AppImage) |
-| | AMD Ryzen AI Max (Strix Halo) | [`Strata-0.2.3-linux-amd-strixhalo.AppImage`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-linux-amd-strixhalo.AppImage) |
-| **Mac** (Apple Silicon, macOS 15 or newer) | built in | [`Strata-0.2.3-mac.dmg`](https://github.com/Niko1221/Strata/releases/latest/download/Strata-0.2.3-mac.dmg) |
-
-**If you are unsure:** for NVIDIA, take `cuda13` if your driver is version 580 or newer, otherwise `cuda12`. `cuda12` is
-for older cards and older drivers. The `hip` and `amd` files are for AMD cards. RX 6000 cards have no installer of
-their own: install `hip-rdna3` (Windows) or `amd-rx7900` (Linux), and on a PC with an RX 6000 card it fetches the RX 6000 engine by itself
-(also `strata update`). That engine is built but not yet tested on a real RX 6000 card: see [AMD cards](docs/AMD_HIP.md).
-
-Then:
-
-- **Windows:** run the `.exe`. It installs for your user and needs no administrator rights. If Windows says "Windows
-  protected your PC", choose **More info**, then **Run anyway** (the installer is not code-signed yet).
-- **Linux:** make the file runnable (`chmod +x`) and start it. It needs FUSE 2: `sudo apt install libfuse2` (Ubuntu 22.04)
-  or `libfuse2t64` (Ubuntu 24.04 and newer).
-- **Mac:** open the `.dmg` and drag Strata onto Applications.
-
-On the first screen the app reads your PC and recommends a model that fits. Press install. The model is a big download
-(about 40-70 GB) and continues where it stopped if it is interrupted. Closing the window stops Strata and the engine.
-
-### Option B: the Terminal (one line)
-
-The Terminal is the `strata` command, for scripts, servers and AI agents.
-
-Linux and Mac:
+Strata runs from a copy of this repository. The installer checks your PC, gets or builds the engine for your graphics
+card, downloads the model you pick and starts serving.
 
 ```sh
-curl -fsSL https://github.com/Niko1221/Strata/releases/latest/download/install.sh | sh
+git clone https://github.com/Niko1221/Strata
+cd Strata
+./setup.sh --yes                      # Linux
+START-HERE.bat --yes                  # Windows
 ```
 
-Windows (PowerShell):
+The first run installs what it needs (Python packages, and CMake and Ninja if the engine has to be compiled), downloads
+the model (about 40-70 GB; an interrupted download continues where it stopped) and starts the server. Its
+`--yes` answers the questions the setup would otherwise ask one at a time: which model, how much context, whether to
+read pictures, who may connect. Without it you choose each one; Enter takes the recommended answer.
 
-```powershell
-irm https://github.com/Niko1221/Strata/releases/latest/download/install.ps1 | iex
-```
+The setup compiles the engine on your PC: 5-15 minutes the first time, with a compiler it installs itself (CMake and
+Ninja, and the CUDA toolkit or ROCm for your card). After that it recompiles only when the source changed.
 
-The script checks your PC, downloads the Terminal, verifies its SHA-256 and unpacks it into your home folder. It needs no
-administrator rights. On Windows, open a new terminal window afterwards. Then start Strata:
+Later runs start the model right away and download nothing twice: run `./setup.sh` (or `START-HERE.bat`) again.
+Closing its window stops the model.
+
+> While the model starts, your PC can be slow or stop responding for 1-3 minutes (longest the first time). Strata loads
+> 35-55 GB into your RAM and locks part of it for the graphics card. Wait, and don't close the window.
+
+**Mac (Apple Silicon, macOS 15 or newer):** the Metal engine is built on the Mac with cmake, and the server runs it from
+a run config; the build and the run steps, and which size fits your Mac, are in [docs/MAC.md](docs/MAC.md).
+
+Everything the setup decided - model, context, pictures, parallel slots, engine flags - is in `strata-<model>.json`, so
+the same model starts again without it:
 
 ```sh
-strata launch
+.venv/bin/python serve/server.py --engine strata --config strata-qwen.json --port 8080
 ```
 
-It asks one question at a time: model, context, pictures, who may connect. Then it downloads the engine for your graphics
-card (signed, and test-started before use) and the model, and starts serving. For scripts and AI agents, use flags:
+Where the files go, what every option does and how to keep the server running: [docs/INSTALL.md](docs/INSTALL.md).
 
-```sh
-strata launch --model q2_0 --yes --no-tui
-```
-
-To read the install script before it runs, download it first with `curl -fsSL <address> -o install.sh`, read it, then run
-`sh install.sh`. All screens and flags: [docs/TERMINAL_LAUNCH.md](docs/TERMINAL_LAUNCH.md).
-
-### Option C: let your AI set it up
+### Let your AI set it up
 
 Paste this into Claude Code, Cursor, Codex, GitHub Copilot or another coding assistant:
 
@@ -142,13 +106,11 @@ Set up Strata on this PC for me: https://github.com/Niko1221/Strata - follow doc
 ```
 
 It checks your graphics card, RAM and disk, picks the model that fits, installs and starts it, and tells you how to
-connect your apps. AI tools can also install, start and stop Strata through its [MCP server](docs/MCP_SERVER.md).
-
-Prefer to build it yourself? See [Build from source](#build-from-source).
+connect your apps.
 
 ## Models
 
-The app and `strata launch` recommend a model for your memory. It is one model in several sizes, compressed more or less.
+The setup recommends a model for your memory. It is one model in several sizes, compressed more or less.
 Smaller sizes are faster. Larger sizes are a bit smarter.
 
 ### Low on memory? Try Gyro
@@ -161,7 +123,7 @@ Smaller sizes are faster. Larger sizes are a bit smarter.
 | **Gyro-M** | 35 GB | 92.0 GB | About IQ3_XXS quality with about 20% less GPU memory. It writes answers 16% (12 GB RTX 3060) to 21% (R9700) slower than Q2_0. |
 
 Gyro runs on NVIDIA and AMD cards (AMD is experimental) on Intel Arc cards on Linux (tested on an Arc A750) and, from 0.2.2, on Apple Silicon Macs (Gyro-S on a 32 GB Mac mini: 9 tok/s, streaming from the SSD; [docs/MAC.md](docs/MAC.md#gyro-s-and-gyro-m-agentionais-trellis-experts)). Details and measurements:
-[docs/GYRO.md](docs/GYRO.md). Start it with `strata launch --model gyro-s`.
+[docs/GYRO.md](docs/GYRO.md). Start it with `./setup.sh --model gyro-s` (`START-HERE.bat --model gyro-s` on Windows).
 
 ### The other sizes
 
@@ -190,8 +152,8 @@ Every size, download and what fits where: [docs/MODELS.md](docs/MODELS.md).
 
 ## How fast is it?
 
-Based on a 12 GB graphics card (RTX 5070, Ryzen 5 7600, 64 GB RAM). See results from other cards:
-[speed of each model](docs/MODELS.md#how-fast-is-each-size), [community results](docs/COMMUNITY_BENCHMARKS.md).
+Based on a 12 GB graphics card (RTX 5070, Ryzen 5 7600, 64 GB RAM).
+[speed of each model](docs/MODELS.md#how-fast-is-each-size).
 
 | Model | Answers appear at | Reads your prompt at |
 | --- | --- | --- |
@@ -217,48 +179,20 @@ tokens per second. The engine version behind each number is in [DETAILS.md](docs
 
 ## Using it
 
-### In the app
+### In the browser
 
-The app has a **Chat**, a **Monitor** of the model and your GPU, CPU and RAM, a **Models** page and **Settings**. The chat
-can work in a folder on your PC. In **Manual** mode it asks before it changes a file or runs a command. Type
-`/loop 10m <what to do>` to repeat a message every 10 minutes while the chat is open.
+The server's own page, at the address the setup prints, has four views: **Chat**, **Monitor** (the model and your GPU,
+CPU and RAM, and the requests it is answering), **Images** (make an image) and **About** (the model and the engine, this
+PC, the addresses for your tools, and Settings). The chat picks the thinking level - off, low, medium or high - reads
+pictures you attach or paste, shows the answer as it is written, and stops it when you press **Stop**. Chats, the page's
+settings and the API key are kept in that browser; the run config on disk keeps the settings of the model and the
+engine, and the page's Settings view writes the keys it documents.
 
-The chat can search the web with DuckDuckGo (or Bing), with no account. You can add a search key under **Settings, Tools**.
-Search is the one feature that sends something off your PC, the search words.
+By default the server answers on `127.0.0.1` only. For your phone or another PC, start it on an address of this PC with
+`--host` and keep an API key: `--api-key` (or `STRATA_API_KEY`, or `"api_key"` in the run config).
+`--no-api-key` serves without one, with a warning.
 
-To run two models, turn on **Run multiple models** and give each model its own card of the same make.
-
-<p align="center"><img src="docs/media/app-chat.png" width="900" alt="The Strata app: a chat where the agent built a small voxel pagoda garden, with the page open in the preview on the right"><br>
-<sub>A chat in the Strata app: the agent wrote a small voxel pagoda garden as one HTML file, and the page opens in the preview next to the conversation</sub></p>
-
-### In the Terminal
-
-<p align="center"><img src="docs/media/terminal-monitor.png" width="900" alt="The Strata Terminal monitor overview while the model writes a reply"><br>
-<sub><code>strata monitor</code> while the model writes a reply: speed, GPU, memory and the recent requests</sub></p>
-
-```sh
-strata launch                                  # guided screens: model, context, pictures, access, then serve
-strata launch --model q2_0 --yes --no-tui     # no questions: serve, print the address, return
-strata launch --plan --model q2_0              # show what would happen; nothing changes
-strata launch --status                         # what is being served now
-strata launch --stop                           # stop it
-strata monitor --url http://127.0.0.1:8080     # watch speed, GPU, memory and requests
-strata update --check                          # is there a new engine? (strata update installs it)
-strata doctor                                  # check the installed engine files
-```
-
-`strata --help` lists everything. Starting and serving never download anything. Only the install, `strata launch` (when
-you choose a model) and `strata update` do. To reach Strata from your phone or another PC, use
-`strata launch --access lan`. It makes an API key (recommended; add `--no-api-key` to go without, with a warning). No browser opens unless
-you add `--open`. Guide: [docs/TERMINAL_LAUNCH.md](docs/TERMINAL_LAUNCH.md). Whole client: [docs/TERMINAL.md](docs/TERMINAL.md).
-
-### With AI agents
-
-An agent installs Strata with the one-line command in Option B and runs
-`strata launch --model NAME --yes --no-tui`. The steps, flags and exit codes are in [docs/AI_SETUP.md](docs/AI_SETUP.md),
-and the repository rules are in [AGENTS.md](AGENTS.md).
-
-### Connect your other apps
+### With your apps and agents
 
 | App type | Base URL |
 | --- | --- |
@@ -266,8 +200,11 @@ and the repository rules are in [AGENTS.md](AGENTS.md).
 | Anthropic API (Claude Code and others) | `http://127.0.0.1:8080`, without `/v1`. These apps add `/v1/messages` themselves. Claude Code: `ANTHROPIC_BASE_URL=http://127.0.0.1:8080` |
 | OpenAI Responses API (Codex CLI) | `http://127.0.0.1:8080/v1/responses` ([setup](docs/DETAILS.md#the-responses-api-and-codex-cli)) |
 
-`strata connect` prints the exact settings for OpenCode, Codex CLI, Claude Code, oh-my-pi, pi, Hermes Agent and OpenClaw.
-`strata connect opencode --write` writes the file after asking and keeps a backup.
+The **About** view shows these addresses with your port in them, ready to copy. The whole API - chat, completions,
+Anthropic messages, responses, pictures, the monitor endpoint - is in
+[docs/DETAILS.md](docs/DETAILS.md#using-it). An agent with a terminal installs with the commands
+in [Install](#install); the steps and exit codes are in [docs/AI_SETUP.md](docs/AI_SETUP.md), and the repository rules
+are in [AGENTS.md](AGENTS.md).
 
 ### Pictures
 
@@ -283,42 +220,16 @@ memory); the processor reader needs about 50 s per picture there, so it runs onl
 
 ### Good to know
 
-- Choose the thinking level (**off, low, medium or high**) in the chat menu or in your app's "reasoning effort". Off is fastest.
-- Strata answers one request at a time by default. For several at once, use `--parallel N` in `strata launch` or
-  `"parallel": 2` in the config ([BATCHING.md](docs/BATCHING.md)). On a 12 GB card this makes each answer slower.
+- Choose the thinking level (**off, low, medium or high**) in the chat or in your app's "reasoning effort". Off is fastest.
+- Strata answers one request at a time by default. For several at once, use `--parallel N` with the setup or
+  `"parallel": 2` in the run config ([BATCHING.md](docs/BATCHING.md)). On a 12 GB card this makes each answer slower.
 - Strata reads the first message of a chat in full, about 1 minute per 30,000 tokens. Follow-up messages start in seconds.
 - Where your chats are stored and the whole API: [docs/INSTALL.md](docs/INSTALL.md#where-things-are-stored), [docs/DETAILS.md](docs/DETAILS.md#using-it).
 
-## Build from source
+## More speed on one card
 
-<details>
-<summary>Windows, Linux and Mac from the repository</summary>
-
-[Download Strata](https://github.com/Niko1221/Strata/archive/refs/heads/main.zip) and unzip it, or `git clone` it.
-**Windows:** double-click `START-HERE.bat`. **Linux:** run `./setup.sh` in the Strata folder.
-
-**Mac (Apple Silicon, macOS 15 or newer):** install Apple's Command Line Tools once with `xcode-select --install`
-(Xcode itself is not needed). Open Terminal in the Strata folder and run `./setup.sh`. It builds the Mac engine on your
-Mac (about 7 minutes), asks the same questions, downloads the model and starts it. Next time, `./setup.sh` starts it
-right away. Which size fits your Mac: [docs/MAC.md](docs/MAC.md).
-
-The installer finds your card and sets up the right engine. It asks which model and size, how much context (how much text
-the model keeps in mind) and whether it should read pictures. Press Enter for the recommended answer. Then it downloads the
-model (about 70 GB) and starts it. If the download stops, run it again and it continues. Your browser opens the Strata
-page at `http://127.0.0.1:8080`.
-
-> While the model starts, your PC can be slow or stop responding for 1-3 minutes (longest the first time). Strata loads
-> 35-55 GB into your RAM and locks part of it for the graphics card. Wait, and don't close the window.
-
-Next time, run `START-HERE.bat` (or `./setup.sh`) again. It starts right away and downloads nothing twice. Close its
-window to stop the model. `UPDATE.bat` (`./update.sh`) updates Strata without starting it. Updating, Docker, several cards,
-where the files go and every option: [docs/INSTALL.md](docs/INSTALL.md).
-
-To measure your PC, run `BENCH.bat` (`./bench.sh`). It takes 5-10 minutes and writes a report you can share
-([how](docs/COMMUNITY_BENCHMARKS.md#run-the-benchmark)).
-
-**Optional: more speed on one card when the whole model fits in RAM.** Two opt-in settings by RubenTorney (#1904, #1905).
-They help when you run one graphics card and your RAM holds every expert, for example Q2_0 or IQ3_XXS on a 64 GB PC. Open
+**Two opt-in settings help when one graphics card does the work and your RAM holds every expert**, for example Q2_0 or
+IQ3_XXS on a 64 GB PC (both by RubenTorney, #1904, #1905). They change how the expert cache is kept and locked. Open
 `strata-<model>.json` in the Strata data folder ([where](docs/INSTALL.md#where-things-are-stored)) and add:
 
 - `"--adapt-async", "1"` to the `"args"` list. The expert cache then updates on a helper thread instead of pausing the
@@ -363,18 +274,18 @@ The longer explanation: [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md). Every part
 
 - **My PC froze the first time Strata started.** It loads the model into RAM. Wait, and don't close the window. Still
   frozen after 10 minutes? Restart the PC, close other programs and try again, or pick a smaller size.
-- **It stopped while downloading or installing.** Start the app or `strata launch` again, or run `START-HERE.bat` (or
-  `./setup.sh`) again. It continues where it stopped.
+- **It stopped while downloading or installing.** Run `START-HERE.bat` (or `./setup.sh`) again. It continues
+  where it stopped.
 - **It is very slow, the disk light keeps blinking, or it says "the engine stopped unexpectedly".** Your PC does not have
   enough free RAM. Close other programs (browsers use a lot), or pick a smaller size such as Q2_0 or IQ2_XS.
-- **It says there is no engine for this PC.** In the app, open **Settings, Engine** and press **Update engine**. In the
-  Terminal, run `strata update`. `strata doctor` shows which engine files are installed.
+- **It says the build tools are missing.** Setup offers to install them; if you would rather see what it found about
+  this PC first, run `./setup.sh --check` (`START-HERE.bat --check`) before you start.
 - **It says port 8080 is already in use.** Strata is already running. Look for its window.
 
-More problems and fixes: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Still stuck? Open an
-[issue](https://github.com/Niko1221/Strata/issues). In the app, attach the file from **Settings, Engine, Diagnostics, View
-logs, Save logs**. In the Terminal, paste the output of `strata doctor`. From source, attach `strata-<model>.log` from the
-Strata folder. For a security problem, report it privately: [SECURITY.md](SECURITY.md).
+More problems and fixes: the [troubleshooting table](docs/DETAILS.md#troubleshooting) in the details. Still stuck? Open an
+[issue](https://github.com/Niko1221/Strata/issues) and attach `strata-<model>.log` from the Strata folder, with
+your graphics card, its driver and what you ran. For a security problem, report it privately:
+[SECURITY.md](SECURITY.md).
 
 ## Credits and license
 
@@ -386,8 +297,8 @@ every model have their own licenses ([which ones](docs/HOW_IT_WORKS.md#license))
 
 ## Contributing
 
-Found a bug, or want to send a change or a benchmark? Read [CONTRIBUTING.md](CONTRIBUTING.md) first. It says what to
-include so that others can check your work.
+Found a bug, or want to send a change? This checkout is a personal copy of Strata - reports and changes go to
+the original: [Niko1221/Strata](https://github.com/Niko1221/Strata) ([CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Support Strata
 
