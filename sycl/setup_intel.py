@@ -18,8 +18,8 @@ setup.py's, unchanged.  What is replaced:
     on the host when the oneAPI compiler is there).  --vision no is the off switch;
   - the RAM rule: the CUDA engine keeps every expert in RAM, the SYCL port streams them from the GGUF into VRAM
     (--stream-experts), so RAM only bounds the KV streaming;
-  - the config: the container's paths, the SYCL flags, backend "sycl"; the run script starts
-    sycl/serve/server_intel.py (serve/server.py plus the Intel Monitor readings and the model menu).
+  - the config: the container's paths, the SYCL flags, backend "sycl"; setup prints the start command, which
+    runs sycl/serve/server_intel.py (serve/server.py plus the Intel Monitor readings and the model menu).
 
 When setup.py changes the steps this relies on, this stops with a message rather than writing a wrong config.
 """
@@ -396,7 +396,7 @@ def install(argv) -> None:
     if exe is None:
         S.fail(f"Strata's SYCL engine cannot be used: {why}", "docs/INTEL.md: build it, then run this again")
     for name in ("gpus", "amd_gpus", "amd_problem", "hip_vision", "build_engine_hip", "hipblaslt_table", "ram_gb",
-                 "write_run_script", "start", "say", "main"):
+                 "write_setup_config", "print_start_lines", "say", "main"):
         if not callable(getattr(S, name, None)):
             S.fail(f"setup.py has no {name}() any more: sycl/setup_intel.py needs updating for this setup.py")
 
@@ -474,10 +474,15 @@ def install(argv) -> None:
         return [t for t in bench_tips(args, env, real_ram, *a, **k) if "auto:32768" not in t]
     S.bench_tips = bench_tips_intel
 
-    write = S.write_run_script
+    write = S.write_setup_config
 
-    def write_run_script(model, cfg_path, port, open_browser=True):   # setup.write_run_script's signature (#870)
+    def write_setup_config_sycl(cfg_path, cfg, *a, **k):   # setup's write, then the SYCL conversion of the file
+        write(cfg_path, cfg, *a, **k)                      # the carry-over and the .bak happen in setup's write
         cfg = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
+        # the size name from the config's file name (strata-<family>-<size>.json, lower case there)
+        model = next((m for m in S.MODELS
+                      if Path(cfg_path).stem[len("strata-"):].lower().endswith(m.lower())),
+                     Path(cfg_path).stem[len("strata-"):])
         # the card setup selected (--gpu / the first usable), not intel[0]: on a PC with two Arcs the config must match
         # the chosen one (docs/INTEL.md, "Two cards"). intel_gpus() lists them in sysfs card order and cfg["gpu"] is
         # that index (setup.py's amd path); a layer split writes a list, and then every listed card is used.
@@ -522,21 +527,21 @@ def install(argv) -> None:
             if why:
                 S.say("  " + why)
         Path(cfg_path).write_text(json.dumps(cfg, indent=1), encoding="utf-8")
-        script = write(model, cfg_path, port, open_browser)
-        script.write_text(script.read_text().replace(str(ROOT / "serve" / "server.py"), str(SERVER)))
-        return script
-    S.write_run_script = write_run_script
+    S.write_setup_config = write_setup_config_sycl
 
-    start = S.start
-
-    def start_sycl(cfg_path, *a, **k):
-        cfg = json.loads(Path(cfg_path).read_text(encoding="utf-8-sig"))
-        if cfg.get("backend") != "sycl":
-            return start(cfg_path, *a, **k)
-        script = ROOT / f"run-{Path(cfg_path).stem[len('strata-'):]}.sh"
-        S.say(f"\nstarting {script.name} ...")
-        os.execv("/bin/sh", ["/bin/sh", str(script)])
-    S.start = start_sycl
+    def print_start_lines_intel(cfg_path, port):
+        """setup's start lines with this folder's server instead of serve/server.py."""
+        shown = Path(cfg_path)
+        try:                                               # the command is run from the Strata folder
+            shown = shown.relative_to(ROOT)
+        except ValueError:
+            pass
+        S.say()
+        S.say("All set.")
+        S.say("  Start the server with:")
+        S.say(f"    .venv/bin/python {SERVER.relative_to(ROOT)} --engine strata --config {shown} --port {port}")
+        S.say(f"  (API: http://127.0.0.1:{port}/v1, any API key; the run config is {shown})")
+    S.print_start_lines = print_start_lines_intel
 
     argv = list(argv)
     if small_card(intel[0]["vram_gb"], intel[0]["driver"]):   # the engine's own advice for a card this size

@@ -45,16 +45,23 @@ packages during an update.
 3. Answer a few questions - or just press Enter each time for the recommended choice ([the questions](#setups-questions)).
 
 Then it downloads everything (the model is ~70 GB, so the first time takes a while - you can stop and it picks up
-where it left off) and **starts the model**. Your browser opens the Strata page at `http://127.0.0.1:8080`.
+where it left off) and writes the run config `strata-<model>.json`. It does not start the server itself: it prints
+the start command, which on Windows looks like
+
+    .venv\Scripts\python.exe serve\server.py --engine strata --config strata-<model>.json --port 8080
+
+Start it that way (or from a shortcut, Task Scheduler or a service); its window shows that the model is ready, and
+the browser opens the Strata page at `http://127.0.0.1:8080`.
 
 > **While the model starts, your PC can be slow or stop responding for 1-3 minutes** (longest the first time): Strata
 > loads 35-55 GB into your RAM and locks part of it for the graphics card. That's normal - wait, and don't close the
 > window. The window tells you what it is doing.
 
-**Next time**, just double-click `START-HERE.bat` again: it starts right away (30-90 s to load the model), nothing is
-downloaded twice. Close its window to stop the model. `SETUP.bat` (the same as `START-HERE.bat --setup`) installs
-another model or changes the settings. Starting Strata from Task Scheduler at logon needs two task settings, or the
-start is 24x slower: [Running it at startup](DETAILS.md#running-it-at-startup-task-scheduler).
+**Next time**, run that start command again (30-90 s to load the model); closing the window stops it. Running
+`START-HERE.bat` again downloads nothing twice - it is only for after an update of Strata or to change something.
+`SETUP.bat` (the same as `START-HERE.bat --setup`) installs another model or changes the settings. Starting Strata
+from Task Scheduler at logon needs two task settings, or the start is 24x slower:
+[Running it at startup](DETAILS.md#running-it-at-startup-task-scheduler).
 
 ## Install on Linux
 
@@ -63,8 +70,10 @@ start is 24x slower: [Running it at startup](DETAILS.md#running-it-at-startup-ta
 ```
 
 The same questions, the same automatic install (it uses `sudo apt` for Python and, only if it has to compile, for
-the build tools), and the same start: `http://127.0.0.1:8080`. Later runs of `./setup.sh` (or `./run-<model>.sh`)
-start the model directly; `./setup.sh --setup` installs another model or changes the settings. Other distributions,
+the build tools), and the same ending: it writes `strata-<model>.json` and prints the start command
+(`.venv/bin/python serve/server.py --engine strata --config strata-<model>.json --port 8080`); the server answers on
+`http://127.0.0.1:8080`. Later runs of `./setup.sh` change or repair what you ask for; `./setup.sh --setup` installs
+another model or changes the settings. Other distributions,
 WSL and compiling: [details](DETAILS.md#linux).
 
 On Nix/NixOS, you can use the flake:
@@ -86,14 +95,14 @@ git clone https://github.com/Niko1221/Strata.git && cd Strata
 - **What it needs:** `git`, a C++ compiler and `cmake` (setup installs the build tools through `sudo apt` on
   Debian and Ubuntu; elsewhere install them first), and the CUDA Toolkit for NVIDIA or ROCm with the HIP compiler for
   a Radeon card ([AMD_HIP.md](AMD_HIP.md)). Python goes into `.venv` of the checkout.
-- **After you change the code:** run `./setup.sh` again. It compiles only what changed and starts the model. To
-  compile without starting the model: `./setup.sh --no-start`. By hand, the build folder is an ordinary CMake build:
+- **After you change the code:** run `./setup.sh` again. It compiles only what changed and writes the config; the
+  server starts with the printed `serve/server.py` command. By hand, the build folder is an ordinary CMake build:
   `cmake --build build --target strata -j8` (`build-hip` for a Radeon card; the options are in
   [AMD_HIP.md](AMD_HIP.md)).
 - **To try a pull request:** `git fetch origin pull/<number>/head:pr-<number> && git checkout pr-<number>`, then
   `./setup.sh`. `git checkout main` goes back; the next `./setup.sh` rebuilds.
 - **Settings for the engine** (for example `STRATA_HIPBLASLT_TUNING=/path/to/table.txt`) go into the `"env"` object of
-  `strata-<model>.json`, which `./setup.sh` writes next to the checkout. `./run-<model>.sh` starts the model with it.
+  `strata-<model>.json`, which `./setup.sh` writes next to the checkout; the server starts with it.
 - **Only compile, without the installer:** the engine is a normal CMake project. For NVIDIA:
   `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=native &&
   cmake --build build --target strata -j8`. The options, and the flags setup passes, are in `setup.py` (search for
@@ -173,8 +182,8 @@ asked. In a copy that was downloaded as a zip, download the new zip and unzip it
 fetch new files itself.
 
 The model files are kept in a `Strata-data` folder next to your Strata folder, so a new copy finds them and sets
-itself up the same way - nothing big is downloaded again. To only compile the new engine without starting the model,
-run `./setup.sh --no-start` (Windows: `START-HERE.bat --no-start`).
+itself up the same way - nothing big is downloaded again. `./setup.sh` (Windows: `START-HERE.bat`) compiles the new
+engine and writes the config; it never starts the model itself.
 
 An update never downloads, replaces or deletes your model files or a saved tuning. What Strata downloads and how it
 checks it: [SAFETY.md](SAFETY.md).
@@ -185,7 +194,7 @@ checks it: [SAFETY.md](SAFETY.md).
   in the browser's local storage (`strata.*` keys) - not on the server and not in the Strata folder. Pictures are not
   kept, only their names. Another browser or a private window starts empty; clearing the site's data deletes them.
 - **How the model starts:** `strata-<model>.json` in the Strata folder (context, GPUs, host, API key, ...), written
-  by setup; next to it `run-<model>.bat` / `.sh`, the log `strata-<model>.log` and, when you use "Use for other
+  by setup; next to it the log `strata-<model>.log` and, when you use "Use for other
   apps too", `strata-<model>.shared-settings.json`. Running setup again for the same model (another context, say)
   rewrites the keys setup writes (`exe`, `args`, `port`, `gpu`, `host`, `api_key`, `vision`, ...) and keeps the
   ones you added (`sampling`, `mcp_servers`, `mcp`, `cors_origins`, ...); the earlier file is kept as
@@ -247,8 +256,8 @@ Every PC is different: `START-HERE.bat --calibrate` (Linux: `./setup.sh --calibr
 on yours and keeps the fastest (about 15-30 minutes, longer on a slow card; on an RTX 5070 with a Ryzen 5 7600 it made the Coder 7% faster).
 It keeps a setting only when it is more than 3% faster, and the result is remembered per PC and model, so updates
 keep it. Measuring the CPU worker count needs a fresh engine, so the model is loaded more than once: the PC is
-busy, and can stop responding for a minute or two, once per restart. When it finishes it **starts the model**,
-so the server is already running when it returns - do not start it a second time.
+busy, and can stop responding for a minute or two, once per restart. When it finishes the settings are saved;
+start the server with your usual command.
 NVIDIA cards for now. [What it measures](DETAILS.md#double-click-start-herebat).
 
 ## Options without questions
@@ -266,11 +275,9 @@ START-HERE.bat --port 8081                      another port
 START-HERE.bat --gpu 1                          another GPU (setup picks the one with the most VRAM)
 START-HERE.bat --gpus 0,2                       several GPUs sharing the model
 START-HERE.bat --vram-reserve-mib 2048          leave 2 GB of VRAM free for other programs (remembered)
-START-HERE.bat --no-browser                     do not open the chat page when the model is ready (remembered;
-                                                --browser undoes it)
 START-HERE.bat --setup --backend hip            the AMD engine on a PC that also has an NVIDIA card
 START-HERE.bat --setup --host 0.0.0.0 --api-key <secret>     reachable from other devices, with a key
-START-HERE.bat --calibrate                      tune the engine for this PC (about 15-30 minutes, longer on a slow card), then start
+START-HERE.bat --calibrate                      tune the engine for this PC (about 15-30 minutes, longer on a slow card)
 START-HERE.bat --check                          only check this PC
 ```
 

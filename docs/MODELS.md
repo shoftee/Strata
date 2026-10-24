@@ -268,5 +268,4 @@ START-HERE.bat --setup --family qwen36 --model UD-Q4_K_XL
   model any time.
 
 Files another model shares are not downloaded again (the Coder uses the original's shard 2 and vision encoder). With more
-than one model installed, `START-HERE.bat` asks which one to start; `run-<model>.bat` (Linux: `run-<model>.sh`) starts one
-directly.
+than one model installed, `START-HERE.bat` lists them and prints the start command of the one you pick.

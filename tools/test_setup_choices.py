@@ -140,8 +140,7 @@ class ReadOnlyGgufDir(unittest.TestCase):
             d.mkdir()
             for i in (1, 2):
                 (d / f"Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-{i:05d}-of-00002.gguf").write_bytes(b"")
-            code, out, cfg, _ = install(ram, found, ["--gguf-dir", str(d), "--family", "qwen", "--model", "Q2_0",
-                                                     "--no-start"],
+            code, out, cfg, _ = install(ram, found, ["--gguf-dir", str(d), "--family", "qwen", "--model", "Q2_0"],
                                         extra=[mock.patch.object(setup, "whole_shard", lambda s: True),
                                                mock.patch.object(setup, "mark", read_only_mark)])
         self.assertEqual(code, 0, out)
@@ -344,7 +343,7 @@ class RotationalDisk(unittest.TestCase):
     def install(self, ram, disk, platform_ok=False, model="Q2_0"):
         from test_setup_golden import PROFILES, install
         _, found = PROFILES["64GB-1x32GB"]
-        return install(ram, found, ["--family", "qwen", "--model", model, "--no-start"],
+        return install(ram, found, ["--family", "qwen", "--model", model],
                        extra=[mock.patch.object(setup, "rotational_disk", lambda p: disk),
                               mock.patch.object(setup, "ple_ram_platform_ok", lambda: platform_ok)])
 
@@ -406,7 +405,7 @@ class VramReserve(unittest.TestCase):
 
     def install(self, *extra):
         from test_setup_golden import install
-        return install(self.ram, self.found, ["--family", "qwen", "--model", "Q2_0", "--no-start", *extra])
+        return install(self.ram, self.found, ["--family", "qwen", "--model", "Q2_0", *extra])
 
     def test_given_at_setup(self):
         code, out, cfg, _ = self.install("--vram-reserve-mib", "2048")
@@ -445,23 +444,6 @@ class VramReserve(unittest.TestCase):
             p.write_text(json.dumps({"args": ["--max-context", "8192"]}))
             self.assertIsNone(setup.choices_from_config(p)["vram_reserve_mib"])
 
-    def test_given_on_a_start(self):
-        with tempfile.TemporaryDirectory() as d:
-            exe = Path(d) / "strata.exe"
-            exe.write_bytes(b"")
-            p = Path(d) / "strata-q2_0.json"
-            p.write_text(json.dumps({"exe": str(exe), "args": ["--kv", "int8"], "gpu": 0, "gpus_asked": True}))
-            call = mock.Mock(return_value=0)
-            with mock.patch.object(setup, "gpus", lambda: self.found), \
-                    mock.patch.object(setup, "is_wsl", lambda: False), \
-                    mock.patch.object(setup, "ensure_engine_for", lambda cards, path, cfg, yes: cfg), \
-                    mock.patch.object(setup.subprocess, "call", call):
-                for n in ("2048", "1024"):
-                    _, out = quiet(setup.start, p, None, None, False, True, None, {"vram_reserve_mib": int(n)})
-                    self.assertEqual(json.loads(p.read_text())["args"], ["--kv", "int8", "--vram-reserve-mib", n])
-        self.assertIn("1024 MiB of VRAM kept free", out)
-        self.assertTrue(call.called)
-
 
 class SmallCardTip(unittest.TestCase):
     """#496: a card under 8 GB (a 6 GB laptop RTX 3060) gets a tip for when the start has no room for the expert cache;
@@ -470,7 +452,7 @@ class SmallCardTip(unittest.TestCase):
     def install(self, vram, *extra):
         from test_setup_golden import card, install
         return install(63.7, [card(0, "NVIDIA GeForce RTX 3060 Laptop GPU", vram, "86")],
-                       ["--family", "qwen", "--model", "Q2_0", "--no-start", *extra])
+                       ["--family", "qwen", "--model", "Q2_0", *extra])
 
     def test_a_6gb_card(self):
         code, out, cfg, _ = self.install(6.0)
@@ -630,7 +612,6 @@ class CalibrateWithModel(unittest.TestCase):
         with mock.patch.object(sys, "argv", ["setup.py", *argv]), \
                 mock.patch.object(setup, "installed_configs", lambda: cfgs), \
                 mock.patch.object(setup, "calibrate_config", lambda c: tuned.append(c.name) or True), \
-                mock.patch.object(setup, "start", lambda *a, **k: 0), \
                 mock.patch.object(setup, "data_folder", lambda d, *a, **k: (Path(tmp.name), [])), \
                 mock.patch.object(setup, "step", side_effect=SystemExit("reached the plain setup")):
             try:
@@ -640,11 +621,11 @@ class CalibrateWithModel(unittest.TestCase):
         return code, tuned
 
     def test_model_is_the_target(self):
-        code, tuned = self.run_main("--calibrate", "--model", "IQ3_XXS", "--yes", "--no-start")
+        code, tuned = self.run_main("--calibrate", "--model", "IQ3_XXS", "--yes")
         self.assertEqual((code, tuned), (0, ["strata-iq3_xxs.json"]))
 
     def test_a_model_not_installed_is_an_error(self):
-        code, tuned = self.run_main("--calibrate", "--model", "IQ3_S", "--yes", "--no-start")
+        code, tuned = self.run_main("--calibrate", "--model", "IQ3_S", "--yes")
         self.assertEqual((code, tuned), (1, []))
 
     def test_targets(self):

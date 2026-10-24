@@ -61,11 +61,11 @@ the new engine is built, the mode can also be changed without a rebuild: edit
 default is `stripe`.
 
 Choose the same model, size, context and image settings as your current
-installation when prompted. Setup recompiles the engine, updates its server
-configuration, and starts it. Later starts keep those settings. To tune the
+installation when prompted. Setup recompiles the engine and updates its
+server configuration. Later starts keep those settings. To tune the
 slots without recompiling, edit the values after `--expert-cache-device1`,
 `--expert-cache-device2` and `--expert-cache-device3` in the stored
-`strata-iq3_xxs.json`, then restart with `.\run-iq3_xxs.bat`.
+`strata-iq3_xxs.json`, then restart the server.
 
 Compare identical requests at one, two and four GPUs, preferably with several
 repeats. VRAM use alone does not show useful offload: compare the per-request

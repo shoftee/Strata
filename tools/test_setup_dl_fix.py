@@ -123,7 +123,7 @@ class Fp4LocalOrder(unittest.TestCase):
         events = []
         with mock.patch.object(setup, "ensure_nvfp4_local_packages", lambda: events.append("packages")):
             ram, found = G.PROFILES["128GB-1x24GB"]
-            _ = G.install(ram, found, ["--family", "nvfp4", "--no-start", "--model", "NVFP4-QAD"])
+            _ = G.install(ram, found, ["--family", "nvfp4", "--model", "NVFP4-QAD"])
         self.assertEqual(events, ["packages"])
 
 

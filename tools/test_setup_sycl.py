@@ -64,7 +64,7 @@ class SyclBackend(unittest.TestCase):
             self.assertTrue(callable(getattr(setup, name, None)), name)
 
     def test_setup_intel_replacements_take_every_argument_of_the_function_they_replace(self):
-        """#870: setup.py grew write_run_script's fourth argument and the port's replacement still took three, so
+        """#870: setup.py grew an argument of one replaced step and the SYCL replacement still took the old set, so
         setup died with a TypeError after the download.  Every `S.<name> = <replacement>` in setup_intel.py must accept
         all the parameters of setup.<name> (or take *args / **kwargs)."""
         import ast

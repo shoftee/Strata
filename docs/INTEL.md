@@ -67,7 +67,7 @@ questions are setup's own. What changes:
   32K and 2,048 MiB with 4,096-token prompt chunks above that, 300 MiB on a card under 12 GB; a
   `--vram-reserve-mib N` you give is kept as given. KV streaming (`--kv-resident 32768`) is on from
   64K up when the RAM holds the KV. A `model_switcher` or `sampling` block from an earlier config is kept.
-  `run-<model>.sh` starts `sycl/serve/server_intel.py`.
+  Setup's printed start command runs `sycl/serve/server_intel.py`.
 - **Arc A-series (`i915`, e.g. the A750 with 8 GB):** a different config, see "Arc A750 and the other Alchemist cards" below.
 - **Engine settings:** the config's `"env"` block reaches the engine. `strata-sycl.sh` forwards every variable starting with
   `STRATA_`, `ONEAPI_`, `UR_`, `IGC_`, `SYCL_` or `ZES_` into the container and sets `STRATA_VERIFY_DEVICE_PLAN=1`,
@@ -80,7 +80,7 @@ checkout, or `STRATA_SYCL_ROOT`). An earlier Strata install on the same PC keeps
 `~/.config/strata/settings.json`; pass `--data-dir <folder above the checkout>/Strata-data` to put this one under the
 mount. A symlink to a folder outside the mount does not work in the container; a hard link does.
 
-Then `run-<model>.sh` (or `./setup.sh --backend sycl` again) starts the model. The first start of a 30 GB model
+Then start it with the command setup printed. The first start of a 30 GB model
 takes about two minutes. `--port N` and `--host 0.0.0.0` work as in upstream's setup.
 
 ## How to build it
@@ -120,7 +120,7 @@ says when the engine is older than it needs).
 ## Things that matter on this GPU
 
 - **`SYCL_CACHE_PERSISTENT` must be 0.** The persistent JIT cache segfaults on Xe2 during the first
-  compile. The start script sets it; if you run llama-server by hand, do too.
+  compile. The container image sets it (sycl/tools/Dockerfile); if you run llama-server by hand, do too.
 - **The whole model goes on the card** (`--n-gpu-layers 999`), except `per_layer_token_embd.weight`,
   the single 28.8 GB tensor of shard 2. `--override-tensor per_layer_token_embd=CPU` keeps it in host
   memory, mmapped and paged from the SSD by row, which is how the model's authors serve it. Host RSS

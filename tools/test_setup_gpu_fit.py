@@ -17,7 +17,7 @@ from test_setup_golden import card, install  # noqa: E402
 
 
 def run(ram, found, model, answers=None, extra=()):
-    argv = ["--family", "qwen", "--no-start", "--model", model, "--context", "32768", *extra]
+    argv = ["--family", "qwen", "--model", model, "--context", "32768", *extra]
     return install(ram, found, argv, answers=answers or {})
 
 
@@ -81,7 +81,7 @@ class SetupFitRule(unittest.TestCase):
         amd = [{"index": 0, "name": "AMD Radeon AI PRO R9700", "vram_gb": 32.0, "arch": "gfx1201", "vendor": "amd"}]
         patches = [mock.patch.object(setup, "amd_gpus", lambda *a, **k: [dict(g) for g in amd]),
                    mock.patch.object(setup, "amd_problem", lambda g: None)]
-        argv = ["--family", "qwen", "--no-start", "--model", "IQ3_XXS", "--context", "32768"]
+        argv = ["--family", "qwen", "--model", "IQ3_XXS", "--context", "32768"]
         code, out, cfg, asked = install(62.0, found, argv, answers={"Which cards?": "1"}, extra=patches)
         self.assertEqual(code, 0, out)
         self.assertIn("This PC has NVIDIA and AMD cards Strata can use", out)

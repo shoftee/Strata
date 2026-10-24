@@ -36,12 +36,12 @@ class RerunKeepsSize(unittest.TestCase):
         return out, cfg, asked
 
     def test_first_install_takes_the_recommendation(self):
-        out, cfg, _ = self.run_setup(["--family", "qwen", "--no-start"], [])
+        out, cfg, _ = self.run_setup(["--family", "qwen"], [])
         self.assertEqual(cfg["model_name"], "qwen3.8-flash-next-iq3_s")
         self.assertNotIn("(installed)", out)
 
     def test_enter_over_an_installed_iq3_xxs_keeps_it(self):
-        out, cfg, asked = self.run_setup(["--family", "qwen", "--setup", "--no-start"], [earlier("IQ3_XXS")])
+        out, cfg, asked = self.run_setup(["--family", "qwen", "--setup"], [earlier("IQ3_XXS")])
         self.assertEqual(cfg["model_name"], "qwen3.8-flash-next-iq3_xxs", out[-1500:])
         line_s = next(x for x in out.splitlines() if " IQ3_S " in x or " IQ3_S\t" in x or "IQ3_S    " in x)
         self.assertIn("(recommended)", line_s)            # still marked, still a choice
@@ -50,17 +50,17 @@ class RerunKeepsSize(unittest.TestCase):
         self.assertTrue(any("Which size?" in a for a in asked))
 
     def test_yes_over_an_installed_size_keeps_it_too(self):
-        _, cfg, asked = self.run_setup(["--family", "qwen", "--setup", "--no-start"], [earlier("Q2_0")], answers=None)
+        _, cfg, asked = self.run_setup(["--family", "qwen", "--setup"], [earlier("Q2_0")], answers=None)
         self.assertEqual(cfg["model_name"], "qwen3.8-flash-next-q2_0")
         self.assertEqual(asked, [])
 
     def test_a_named_size_still_wins(self):
-        _, cfg, _ = self.run_setup(["--family", "qwen", "--model", "IQ3_S", "--setup", "--no-start"], [earlier("IQ3_XXS")])
+        _, cfg, _ = self.run_setup(["--family", "qwen", "--model", "IQ3_S", "--setup"], [earlier("IQ3_XXS")])
         self.assertEqual(cfg["model_name"], "qwen3.8-flash-next-iq3_s")
 
     def test_another_family_is_not_touched(self):
         # a Qwen IQ3_XXS install does not pre-select anything for the Unsloth family
-        _, cfg, _ = self.run_setup(["--family", "unsloth", "--setup", "--no-start"], [earlier("IQ3_XXS")])
+        _, cfg, _ = self.run_setup(["--family", "unsloth", "--setup"], [earlier("IQ3_XXS")])
         self.assertIn("unsloth", cfg["model_name"])
 
     def test_the_helper_prefers_the_most_recent_config_of_the_family(self):

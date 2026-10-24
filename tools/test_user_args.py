@@ -59,7 +59,7 @@ class SetupRerun(unittest.TestCase):
         self.ram, self.found = PROFILES["64GB-1x32GB"]
 
     def run_setup(self, *extra, configs=()):
-        return install(self.ram, self.found, ["--family", "qwen", "--model", "Q2_0", "--no-start", *extra], configs=configs)
+        return install(self.ram, self.found, ["--family", "qwen", "--model", "Q2_0", *extra], configs=configs)
 
     def first(self):
         code, out, first, _ = self.run_setup("--context", "65536")

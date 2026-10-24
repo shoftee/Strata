@@ -136,7 +136,7 @@ top-level option the engine is at `build-sycl/sycl/strata`, so either use `-S sy
 ```
 
 This prints the experimental warning and continues with `sycl/setup_intel.py` (in setup's own Python environment).
-That script finds the Arc in sysfs, uses the SYCL engine you built, and writes the config and `run-<model>.sh`.
+That script finds the Arc in sysfs, uses the SYCL engine you built, writes the config and prints the start command.
 On a card under 12 GB or an `i915` card (the A-series) it writes the small-card config ([INTEL.md](INTEL.md), "Arc A750
 and the other Alchemist cards"). It still downloads and packs the model
 the usual way. To run the engine by hand (no Docker), see "How to run it by hand" in [INTEL.md](INTEL.md).

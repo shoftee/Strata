@@ -33,7 +33,7 @@ trellis family (types 147-149) that the engine does not have.
 
 Setup downloads the pinned revision of the file (size and SHA-256 checked), prepares the pack (`tools/iq_pack.py
 --compat-bf16`: the Hadamard table and the dense weights, 1.5 GB), the draft head (Strata's own MTP head, prepared from
-the original model as for every Qwen3.8-Flash-Next file) and the start script. Needs engine 0.1.45.1 or newer: the pack is native_experts.txt v5 (Hadamard-folded), which the engine reads since the
+the original model as for every Qwen3.8-Flash-Next file) and the run config. Needs engine 0.1.45.1 or newer: the pack is native_experts.txt v5 (Hadamard-folded), which the engine reads since the
 APR port, and the released 0.1.45 stops at v4. An installed engine that is older is replaced by one compiled from this source
 (setup), and setup says so.
 

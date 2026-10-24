@@ -40,7 +40,7 @@ class PictureDefaults(unittest.TestCase):
             ram, found = PROFILES[key]
             for fam, model in (("qwen", "Q2_0"), ("swift", "IQ3_S"), ("coder", "IQ1_M")):
                 for answers in (None, ""):
-                    code, out, cfg, _ = install(ram, found, ["--family", fam, "--model", model, "--no-start"], answers=answers)
+                    code, out, cfg, _ = install(ram, found, ["--family", fam, "--model", model], answers=answers)
                     where = (key, fam, model, answers)
                     self.assertEqual(code, 0, (where, out[-1500:]))
                     self.assertIn("--vision", cfg["args"], where)
@@ -52,7 +52,7 @@ class PictureDefaults(unittest.TestCase):
         from test_setup_golden import PROFILES, install
         ram, found = PROFILES["64GB-1x32GB"]
         for fam, model in (("qwen", "Q2_0"), ("swift", "IQ3_S"), ("coder", "IQ1_M")):
-            code, out, cfg, _ = install(ram, found, ["--family", fam, "--model", model, "--no-start", "--vision", "no"])
+            code, out, cfg, _ = install(ram, found, ["--family", fam, "--model", model, "--vision", "no"])
             self.assertEqual(code, 0, out[-1500:])
             self.assertNotIn("--vision", cfg["args"])
             self.assertNotIn("vision", cfg)

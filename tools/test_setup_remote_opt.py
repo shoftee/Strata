@@ -81,7 +81,7 @@ class Install(unittest.TestCase):
     def test_install_on_two_gpus(self):
         """#1447: a plain two-GPU install has no helper cache, so no --remote-expert-opt is written."""
         ram, found = PROFILES["47GB-2x16GB"]
-        args = ["--family", "qwen", "--no-start", "--model", "Q2_0", "--gpus", "0,1"]      # named: since the fit rule the default is the largest card + RAM
+        args = ["--family", "qwen", "--model", "Q2_0", "--gpus", "0,1"]      # named: since the fit rule the default is the largest card + RAM
         code, text, cfg, _ = install(ram, found, args)
         self.assertEqual(code, 0, text)
         self.assertIsInstance(cfg.get("gpu"), list)
@@ -89,7 +89,7 @@ class Install(unittest.TestCase):
 
     def test_install_on_one_gpu(self):
         ram, found = PROFILES["96GB-1x16GB"]
-        code, text, cfg, _ = install(ram, found, ["--family", "qwen", "--no-start", "--model", "Q2_0"])
+        code, text, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "Q2_0"])
         self.assertEqual(code, 0, text)
         self.assertNotIn(FLAG, cfg["args"])
 

@@ -103,7 +103,7 @@ class Context(unittest.TestCase):
         self.assertAlmostEqual(setup.ctx_ram_need("IQ3_S", 262144), 77.9, places=1)
 
     def test_an_explicit_256k_is_kept(self):
-        code, out, cfg, _ = install(self.RAM64, self.GPU32, ["--family", "qwen", "--model", "IQ3_S", "--no-start",
+        code, out, cfg, _ = install(self.RAM64, self.GPU32, ["--family", "qwen", "--model", "IQ3_S",
                                                              "--context", "262144"])
         self.assertEqual(code, 0, out)
         self.assertEqual(arg(cfg, "--max-context"), "262144")
@@ -113,7 +113,7 @@ class Context(unittest.TestCase):
                       "recommended size.", out)
 
     def test_a_picked_256k_is_kept_and_the_menu_says_the_risk(self):
-        code, out, cfg, asked = install(self.RAM64, self.GPU32, ["--family", "qwen", "--model", "IQ3_S", "--no-start"],
+        code, out, cfg, asked = install(self.RAM64, self.GPU32, ["--family", "qwen", "--model", "IQ3_S"],
                                         answers={"Context?": "6"})
         self.assertEqual(code, 0, out)
         self.assertEqual(arg(cfg, "--max-context"), "262144")
@@ -124,7 +124,7 @@ class Context(unittest.TestCase):
     def test_a_200k_choice_is_kept(self):
         """#406: 200K was added between the 128K rule and 256K - it is inside the trained 262144, so no rope scaling,
         and a pick of it is kept with the note 256K gets instead of being capped to 128K."""
-        code, out, cfg, _ = install(self.RAM64, self.GPU32, ["--family", "qwen", "--model", "IQ3_S", "--no-start"],
+        code, out, cfg, _ = install(self.RAM64, self.GPU32, ["--family", "qwen", "--model", "IQ3_S"],
                                     answers={"Context?": "5"})
         self.assertEqual(code, 0, out)
         self.assertEqual(arg(cfg, "--max-context"), "204800")
@@ -135,7 +135,7 @@ class Context(unittest.TestCase):
 
     def test_low_ram_mode_keeps_262k_without_a_ram_note(self):
         ram, found = PROFILES["32GB-2x24GB"]                              # #364
-        code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "IQ3_XXS", "--no-start",
+        code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "IQ3_XXS",
                                                  "--context", "262144"])
         self.assertEqual(code, 0, out)
         self.assertEqual(arg(cfg, "--max-context"), "262144")
@@ -146,14 +146,11 @@ class Context(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             prev = Path(d) / "strata-iq3_s.json"
             prev.write_text(json.dumps({"args": ["--max-context", "262144", "--kv", "int8"], "port": 8080}))
-            started = mock.Mock(return_value=0)
             code, out, cfg, _ = install(self.RAM64, self.GPU32, [], extra=[
-                mock.patch.object(setup, "previous_config", lambda *a: prev),
-                mock.patch.object(setup, "start", started)])
+                mock.patch.object(setup, "previous_config", lambda *a: prev)])
         self.assertEqual(code, 0, out)
         self.assertEqual(arg(cfg, "--max-context"), "262144")
         self.assertIn("Kept as you chose", out)
-        self.assertTrue(started.called)
 
 
 class BrokenEarlierConfig(unittest.TestCase):
@@ -168,8 +165,7 @@ class BrokenEarlierConfig(unittest.TestCase):
                 (Path(d) / name).write_text(text, encoding="utf-8")
                 os.utime(Path(d) / name, (1_700_000_000 + i, 1_700_000_000 + i))
             return install(self.RAM64, self.GPU32, [], extra=[
-                mock.patch.object(setup, "other_installs", lambda settings: [Path(d)]),
-                mock.patch.object(setup, "start", mock.Mock(return_value=0))])
+                mock.patch.object(setup, "other_installs", lambda settings: [Path(d)])])
 
     def test_an_empty_config_is_skipped(self):
         for text, why in (("", "the file is empty"), ("{\"args\": [", "not valid JSON"), ("[1]", "not a JSON object")):
@@ -217,7 +213,7 @@ class LowRamGpus(unittest.TestCase):
         for prof, model in (("32GB-2x24GB", "IQ3_XXS"), ("32GB-2x24GB", "Q2_0"), ("47GB-2x16GB", "IQ3_XXS")):
             with self.subTest(prof=prof, model=model):
                 ram, found = PROFILES[prof]
-                code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", model, "--no-start",
+                code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", model,
                                                          "--gpus", "0,1"])
                 self.assertEqual(code, 0, out)
                 self.assertEqual(cfg["gpu"], [0, 1])
@@ -230,14 +226,14 @@ class LowRamGpus(unittest.TestCase):
 
     def test_the_share_counts_every_card(self):
         ram, found = PROFILES["47GB-2x16GB"]                              # #384: 2 x 16 GB, 47 GB, IQ3_XXS at 64K
-        code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "IQ3_XXS", "--no-start",
+        code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "IQ3_XXS",
                                                  "--gpus", "0,1"])
         one = setup.low_ram_gpu_gb("IQ3_XXS", 15.9, 65536, "int8")
         self.assertIn(f"the GPUs hold ~{100 * 2 * one / setup.MODELS['IQ3_XXS']['arena_gb']:.0f}% of them", out)
 
     def test_asked_and_answered_two(self):
         ram, found = PROFILES["32GB-2x24GB"]
-        code, out, cfg, asked = install(ram, found, ["--family", "qwen", "--model", "Q2_0", "--no-start"],
+        code, out, cfg, asked = install(ram, found, ["--family", "qwen", "--model", "Q2_0"],
                                         answers={"Low-RAM mode: which GPUs?": "2"})     # the roles are the default (Main last); the low-RAM question still defaults to one card
         self.assertEqual(code, 0, out)
         self.assertTrue(any("Low-RAM mode: which GPUs? [1]" in q for q in asked), asked)
@@ -248,7 +244,7 @@ class LowRamGpus(unittest.TestCase):
     def test_yes_and_enter_keep_one_gpu(self):
         ram, found = PROFILES["32GB-2x24GB"]
         for answers in (None, ""):
-            code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "Q2_0", "--no-start"],
+            code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "Q2_0"],
                                         answers=answers)
             self.assertEqual(code, 0, out)
             self.assertEqual(cfg["gpu"], 0)
@@ -256,7 +252,7 @@ class LowRamGpus(unittest.TestCase):
 
     def test_low_ram_resident_with_gpus(self):
         ram, found = PROFILES["32GB-2x24GB"]
-        code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "Q2_0", "--no-start", "--gpus", "0,1",
+        code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "Q2_0", "--gpus", "0,1",
                                                  "--low-ram", "resident"])
         self.assertEqual(code, 0, out)
         self.assertEqual(cfg["gpu"], [0, 1])
@@ -265,7 +261,7 @@ class LowRamGpus(unittest.TestCase):
 
     def test_low_ram_resident_alone_keeps_one_gpu_without_asking(self):
         ram, found = PROFILES["32GB-2x24GB"]
-        code, out, cfg, asked = install(ram, found, ["--family", "qwen", "--model", "Q2_0", "--no-start",
+        code, out, cfg, asked = install(ram, found, ["--family", "qwen", "--model", "Q2_0",
                                                      "--low-ram", "resident"], answers="")
         self.assertEqual(code, 0, out)
         self.assertEqual(cfg["gpu"], 0)
@@ -275,14 +271,14 @@ class LowRamGpus(unittest.TestCase):
         """#642: an engine that runs the resident variant on a layer split keeps the cards together, resident."""
         ram, found = PROFILES["32GB-2x24GB"]
         with mock.patch.object(setup, "MIN_ENGINE", setup.RESIDENT_SPLIT_ENGINE):
-            code, out, cfg, asked = install(ram, found, ["--family", "qwen", "--model", "Q2_0", "--no-start"],
+            code, out, cfg, asked = install(ram, found, ["--family", "qwen", "--model", "Q2_0"],
                                             answers={"Use these roles?": "y"})     # the recommended roles: Main 0 (last), Helper 1
             self.assertEqual(code, 0, out)
             self.assertEqual(cfg["gpu"], [0, 1])
             self.assertIn("--resident-experts", cfg["args"])
             self.assertFalse(any("Low-RAM mode" in q for q in asked), asked)
             self.assertIn("stay in RAM", out)
-            code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "Q2_0", "--no-start",
+            code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "Q2_0",
                                                      "--gpus", "0,1", "--low-ram", "resident"])
             self.assertEqual(code, 0, out)
             self.assertEqual(cfg["gpu"], [0, 1])
@@ -344,33 +340,13 @@ class StartOnSeveralGpus(unittest.TestCase):
             self.assertEqual(cfg["args"], ["--resident-experts"])
             self.assertNotIn("OS file cache", out)
 
-    def test_start_with_gpus(self):
-        found = PROFILES["32GB-2x24GB"][1]
-        with tempfile.TemporaryDirectory() as d:
-            exe = Path(d) / "strata.exe"
-            exe.write_bytes(b"")
-            p = Path(d) / "strata-q2_0.json"
-            p.write_text(json.dumps({"exe": str(exe), "args": ["--resident-experts"], "gpu": 0, "gpus_asked": True}))
-            call = mock.Mock(return_value=0)
-            with mock.patch.object(setup, "gpus", lambda: found), \
-                    mock.patch.object(setup, "ensure_engine_for", lambda cards, path, cfg, yes: cfg), \
-                    mock.patch.object(setup, "is_wsl", lambda: False), \
-                    mock.patch.object(setup.subprocess, "call", call):
-                code, out, _ = run(setup.start, p, None, [0, 1], False, True)
-            cfg = json.loads(p.read_text())
-        self.assertIsNone(code, out)
-        self.assertEqual(cfg["gpu"], [0, 1])
-        self.assertEqual(cfg["args"], ["--mmap-experts"])   # #1447: no helper cache, no --remote-expert-opt
-        self.assertIn("no layer split yet", out)
-        self.assertTrue(call.called)
-
 
 class SmallCard(unittest.TestCase):
     """S9: a card under 8 GB named with --gpus is a risk to confirm, not a stop."""
     FOUND = [card(0, "NVIDIA GeForce RTX 3090", 24.0, "86"), card(1, "NVIDIA GeForce RTX 2060", 6.0, "75")]
 
     def test_named_with_yes(self):
-        code, out, cfg, _ = install(63.7, self.FOUND, ["--family", "qwen", "--model", "Q2_0", "--no-start",
+        code, out, cfg, _ = install(63.7, self.FOUND, ["--family", "qwen", "--model", "Q2_0",
                                                        "--gpus", "0,1"])
         self.assertEqual(code, 0, out)
         self.assertEqual(cfg["gpu"], [0, 1])
@@ -378,13 +354,13 @@ class SmallCard(unittest.TestCase):
         self.assertIn("is used together with the others, as you chose", out)
 
     def test_named_and_enter_stops(self):
-        code, out, cfg, asked = install(63.7, self.FOUND, ["--family", "qwen", "--model", "Q2_0", "--no-start",
+        code, out, cfg, asked = install(63.7, self.FOUND, ["--family", "qwen", "--model", "Q2_0",
                                                            "--gpus", "0,1"], answers="")
         self.assertEqual(code, 1)
         self.assertTrue(any("Use it anyway?" in q for q in asked), asked)
 
     def test_not_named_is_not_offered(self):
-        code, out, cfg, _ = install(63.7, self.FOUND, ["--family", "qwen", "--model", "Q2_0", "--no-start"])
+        code, out, cfg, _ = install(63.7, self.FOUND, ["--family", "qwen", "--model", "Q2_0"])
         self.assertEqual(code, 0, out)
         self.assertEqual(cfg["gpu"], 0)                                   # one card: as before
 
@@ -403,13 +379,13 @@ class SplitShortCard(unittest.TestCase):
 
     def test_yes_takes_the_recommended_roles(self):
         """The 10 GB card is above the 8 GB line, so it starts as a Helper (the owner's rule); the first card is Main and goes last."""
-        code, out, cfg, _ = install(127.8, self.FOUND, ["--family", "qwen", "--model", "Q2_0", "--no-start"])
+        code, out, cfg, _ = install(127.8, self.FOUND, ["--family", "qwen", "--model", "Q2_0"])
         self.assertEqual(code, 0, out)
         self.assertEqual(cfg["gpu"], [1, 0])
         self.assertEqual(cfg["gpu_roles"], {"0": "main", "1": "helper"})
 
     def test_named_pair_is_kept(self):
-        code, out, cfg, _ = install(127.8, self.FOUND, ["--family", "qwen", "--model", "Q2_0", "--no-start",
+        code, out, cfg, _ = install(127.8, self.FOUND, ["--family", "qwen", "--model", "Q2_0",
                                                         "--gpus", "0,1"])
         self.assertEqual(code, 0, out)
         self.assertEqual(cfg["gpu"], [0, 1])
@@ -431,12 +407,12 @@ class RamFloor(unittest.TestCase):
     FOUND = [card(0, "NVIDIA GeForce RTX 3060", 8.0, "86")]
 
     def test_yes_alone_stops(self):
-        code, out, cfg, _ = install(19.9, self.FOUND, ["--family", "qwen", "--no-start"])
+        code, out, cfg, _ = install(19.9, self.FOUND, ["--family", "qwen"])
         self.assertEqual(code, 1)
         self.assertIn("--model NAME --yes", out)
 
     def test_an_explicit_model_goes_on(self):
-        code, out, cfg, _ = install(19.9, self.FOUND, ["--family", "coder", "--model", "IQ1_M", "--no-start"])
+        code, out, cfg, _ = install(19.9, self.FOUND, ["--family", "coder", "--model", "IQ1_M"])
         self.assertEqual(code, 0, out)
         self.assertIn("going on with 20 GB of RAM, as you chose", out)
 
@@ -446,7 +422,7 @@ class KvStreaming(unittest.TestCase):
     RAM, FOUND = PROFILES["64GB-1x32GB"]
 
     def go(self, model, *flags):
-        return install(self.RAM, self.FOUND, ["--family", "qwen", "--model", model, "--no-start", *flags])
+        return install(self.RAM, self.FOUND, ["--family", "qwen", "--model", model, *flags])
 
     def test_off(self):
         code, out, cfg, _ = self.go("IQ3_XXS", "--kv-streaming", "off")
@@ -487,7 +463,7 @@ class RulesAgreeWithTheWrittenConfig(unittest.TestCase):
     RAM32, CARDS32 = PROFILES["32GB-2x24GB"]
 
     def go(self, ram, cards, model, *flags):
-        return install(ram, cards, ["--family", "qwen", "--model", model, "--no-start", *flags])
+        return install(ram, cards, ["--family", "qwen", "--model", model, *flags])
 
     @mock.patch.object(setup, "is_wsl", lambda: False)   # #974: not WSL, as in install()
     def test_the_streaming_rule_is_the_flag_setup_writes(self):

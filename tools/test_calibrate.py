@@ -443,7 +443,7 @@ class SetupIntegration(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(self.S, "ROOT", Path(self.tmp.name)), \
                 mock.patch.object(self.S, "data_folder", lambda d, *a, **k: (Path(self.tmp.name) / "data", [])), \
-                mock.patch.object(sys, "argv", ["setup.py", "--calibrate", "--no-start"]), \
+                mock.patch.object(sys, "argv", ["setup.py", "--calibrate"]), \
                 contextlib.redirect_stdout(out):
             self.assertEqual(self.S.main(), 0)
         self.assertIn("this PC is NOT tuned: the tuning failed (the reason is above); the model keeps the default "

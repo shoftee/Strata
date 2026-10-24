@@ -61,7 +61,7 @@ the kernel's amdgpu driver (no ROCm install needed):
   hand (`./setup.sh --calibrate`) is saved for the AMD card it ran on and reused when setup runs again. The Monitor
   shows the card's load, VRAM, temperature and power from Linux sysfs (0.1.32).
 
-The rest of setup is the same as on NVIDIA: the model download, the start script, the server.
+The rest of setup is the same as on NVIDIA: the model download, the run config, the printed start command.
 
 ## Engine builds
 

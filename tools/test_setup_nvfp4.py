@@ -209,7 +209,7 @@ class MockedInstall(unittest.TestCase):
     def run_install(self, prof, model=None, extra_argv=()):
         import test_setup_golden as G
         ram, found = G.PROFILES[prof]
-        return G.install(ram, found, ["--family", "nvfp4", "--no-start", *(["--model", model] if model else []),
+        return G.install(ram, found, ["--family", "nvfp4", *(["--model", model] if model else []),
                                       *extra_argv])
 
     def flag(self, args, name):
@@ -283,7 +283,7 @@ class MockedInstall(unittest.TestCase):
         import test_setup_golden as G
         ram, _ = G.PROFILES["128GB-1x24GB"]
         amd = [{"index": 0, "name": "AMD Radeon AI PRO R9700", "vram_gb": 31.9, "arch": "gfx1201"}]
-        code, out, cfg, _ = G.install(ram, [], ["--family", "nvfp4", "--no-start", "--backend", "hip"],
+        code, out, cfg, _ = G.install(ram, [], ["--family", "nvfp4", "--backend", "hip"],
                                       extra=[mock.patch.object(setup, "amd_gpus", lambda *a, **k: amd)])
         self.assertNotEqual(code, 0)
         self.assertIn("UD-IQ4_XS", out)

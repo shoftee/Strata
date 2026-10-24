@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Strata one-click setup and start (Windows and Linux, NVIDIA or AMD GPUs).
+"""Strata setup (Windows and Linux, NVIDIA or AMD GPUs).
 
     START-HERE.bat  (Windows)   /   ./setup.sh  (Linux)      - they install Python if needed and run this file
 
 The first time it asks four questions - which model (the original Qwen3.8-Flash-Next or the Swift 1.5 fine-tune),
-which size, how much context, and whether the model should also read images - then installs everything and starts the model on http://127.0.0.1:8080 (OpenAI- and Anthropic-compatible
-API; a small page there shows that it runs). Every later start skips straight to running the model: nothing that
-is already downloaded, installed or prepared is done again.
+which size, how much context, and whether the model should also read images - then installs everything and writes
+the run config (`strata-<model>.json`). It does not start the model itself: the server is started with
+`serve/server.py` and that config, from your own command or service.  Nothing that is already downloaded,
+installed or prepared is done again on a rerun.
 
 What the first run does (each step is skipped when it is already done):
 
@@ -17,13 +18,14 @@ What the first run does (each step is skipped when it is already done):
      AMD (--backend hip, chosen by itself on a PC with no usable NVIDIA card) compiles here too, on Linux
   5. downloads the model from Hugging Face (resumable), and the vision encoder if you want images
   6. prepares the model for Strata and fetches the MTP draft layer (~5 GB, from the original Qwen checkpoint)
-  7. writes run-<model>.bat / run-<model>.sh and starts the model
+  7. writes the run config: strata-<model>.json
 
 Options: --family qwen|swift, --model Q2_0|IQ2_XS|IQ3_XXS|IQ3_S, --context 32768, --rope-scaling none|linear|yarn
 (--rope-scale F; past the trained 262144 the setup adds yarn and the factor is the final context over 262144,
 at least 1 - an explicit --rope-scaling none is refused for such a context), --vision yes|no|gpu|cpu, --port
 8080, --yes (recommended
-answers, no questions), --setup (install another model / change settings instead of starting), --no-start,
+answers, no questions), --setup (install another model / change settings), --calibrate (measure the engine
+settings for an installed model),
 --host 0.0.0.0 --api-key KEY (reach it from other devices on your network), --experimental-speed-projection on|off
 (EXPERIMENTAL, off by default),
 --models-dir DIR, --gguf-dir DIR (use GGUF files you already have), --check (only check this PC),
@@ -52,7 +54,6 @@ import shutil
 import struct
 import subprocess
 import sys
-import textwrap
 import threading
 import time
 import urllib.error
@@ -1573,38 +1574,12 @@ def engine_archs(toolkit=13):
     return [int(x) for x in meta.get("archs", [])], bool(meta.get("ptx"))
 
 
-def engine_archs_hip():
-    """The AMD architectures the installed HIP engine was compiled for ("gfx1201", ...), or None."""
-    try:
-        meta = json.loads((ROOT / "engine" / "BUILD.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return [str(x) for x in meta.get("archs", [])] if meta.get("backend") == "hip" else None
-
-
 def engine_runs_on(g, toolkit=13) -> bool:
     ea = engine_archs(toolkit)
     if ea is None or not ea[0]:
         return True
     archs, ptx = ea
     return int(g["arch"]) in archs or (ptx and int(g["arch"]) > max(archs))
-
-
-def start_gpus(text):
-    """--gpus when starting an installed model: NVIDIA cards as nvidia-smi numbers them, or on a PC whose AMD cards
-    are the ones Strata can use, AMD cards as setup lists them ("all": every supported AMD card)."""
-    if not text:
-        return None
-    found = gpus()
-    if str(text).strip().lower() == "all" and not WIN and not together_ok(found):
-        amd = amd_gpus()
-        if len([g for g in amd if amd_problem(g) is None]) >= 2:
-            return [g["index"] for g in amd_parse_gpus("all", amd)]
-    if not found and not WIN:                          # #1594: no NVIDIA card, AMD ones: "1,0" names those, as setup lists them
-        amd = amd_gpus()
-        if amd:
-            return [g["index"] for g in amd_parse_gpus(text, amd)]
-    return parse_gpus(text, found)
 
 
 def choose_gpus(a, found) -> list:
@@ -5589,11 +5564,6 @@ def previous_config(elsewhere_first: list, settings: dict):
     return next((c for c in sorted(cands, key=lambda p: p.stat().st_mtime, reverse=True) if readable_config(c)), None)
 
 
-def own_path_config(cfg: dict) -> bool:
-    """A config for a family with its own engine path (Qwen3.6): its --mtp is a draft count, not a draft layer."""
-    return cfg.get("arch") in {d["arch"] for d in OWN_PATH_FAMILIES.values()}
-
-
 def choices_from_config(cfg_path: Path) -> dict:
     """The setup answers a config was written with (family, size, context, KV, images, projection, network)."""
     cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
@@ -5877,175 +5847,6 @@ def upgrade_config(cfg_path: Path, cfg: dict) -> dict:
     if changed:
         write_config(cfg_path, cfg)
     return cfg
-
-
-def settings_summary(cfg: dict, port=None) -> str:
-    """#564: the settings a start uses, in one line: the config's engine options (the model's file paths left out)
-    and the server's own fields, so a change made by hand to strata-<model>.json can be checked without the log."""
-    a, out, i = [str(x) for x in cfg.get("args") or []], [], 0
-    while i < len(a):
-        flag = a[i]
-        val = a[i + 1] if i + 1 < len(a) and not a[i + 1].startswith("--") else None
-        i += 1 if val is None else 2
-        if not flag.startswith("--"):
-            continue                                   # a positional: the model file
-        if val is not None and ("/" in val or "\\" in val or val.lower().endswith((".gguf", ".bin"))):
-            continue                                   # a path: --native, --mtp, --profile ...
-        out.append(flag if val is None else f"{flag} {val}")
-    srv = [f"{cfg.get('host', '127.0.0.1')}:{port or cfg.get('port', 8080)}"]
-    if cfg.get("api_key"):
-        srv.append("api key set")
-    if cfg.get("open_browser") is False:               # #609
-        srv.append("no browser")
-    for k in ("gpu", "layer_split", "draft_vocab", "fit_max_tokens", "reasoning_budget_tokens", "anthropic_thinking"):
-        if cfg.get(k) is not None:
-            v = cfg[k]
-            srv.append(f"{k} {','.join(map(str, v)) if isinstance(v, list) else str(v).lower() if isinstance(v, bool) else v}")
-    return " ".join(out) + ("; " if out else "") + "server " + ", ".join(srv)
-
-
-def start(cfg_path: Path, port: int | None, gpu: int | list | None = None, open_browser=True, yes=False,
-          layer_split=None, keep=None) -> int:
-    """Start the model.  Nothing is installed, downloaded or compiled while it starts (strata_control/acquisition.py):
-    what is missing is named with the step that installs it (the install, or the update)."""
-    with acquisition.forbidden():
-        return _start(cfg_path, port, gpu, open_browser, yes, layer_split, keep)
-
-
-def _start(cfg_path: Path, port: int | None, gpu: int | list | None = None, open_browser=True, yes=False,
-           layer_split=None, keep=None) -> int:
-    """keep: settings given on this start that the model keeps from now on (--host, --api-key, --draft-vocab,
-    --vram-reserve-mib)."""
-    cfg = upgrade_config(cfg_path, json.loads(cfg_path.read_text(encoding="utf-8-sig")))
-    missing = [p for p in [cfg["exe"], *[a for a in cfg["args"] if a.endswith(".gguf")]] if not Path(p).exists()]
-    if missing:
-        fail(f"{cfg_path.name} refers to missing files: {missing[0]}", "run it again with --setup to repair")
-    keep = {k: v for k, v in (keep or {}).items() if v is not None}
-    reserve = keep.pop("vram_reserve_mib", None)       # #493: an engine argument, kept in the config's args
-    if reserve is not None:
-        args = cfg["args"]
-        if "--vram-reserve-mib" in args[:-1]:
-            args[args.index("--vram-reserve-mib") + 1] = str(reserve)
-        else:
-            args += ["--vram-reserve-mib", str(reserve)]
-        cfg[user_args.USER_KEY] = user_args.set_flag(user_args.capture(cfg), "--vram-reserve-mib", reserve)   # the person's own value: kept by every later setup run and start
-        if user_args.WRITTEN_KEY in cfg:
-            cfg[user_args.WRITTEN_KEY] = list(cfg["args"])
-        write_config(cfg_path, cfg)
-        ok(f"saved for this model: {reserve} MiB of VRAM kept free for other programs (--vram-reserve-mib)")
-    if keep and any(cfg.get(k) != v for k, v in keep.items()):   # #179: a --host/--api-key on a start was ignored
-        cfg.update(keep)
-        write_config(cfg_path, cfg)
-        ok("saved for this model: " + ", ".join(
-            "api key" if k == "api_key" else ("the browser opens" if v else "no browser") if k == "open_browser"
-            else f"{k.replace('_', ' ')} {v}" for k, v in keep.items()))
-    cfg_path.touch()                                     # the most recently used model
-    if "--mtp" in cfg["args"][:-1] and not own_path_config(cfg):
-        refresh_draft_vocab(Path(cfg["args"][cfg["args"].index("--mtp") + 1]), cfg.get("draft_vocab", "cjk"))
-    cmd = [sys.executable, str(ROOT / "serve" / "server.py"), "--engine", "strata", "--config", str(cfg_path),
-           "--port", str(port or cfg.get("port", 8080))]
-    if cfg.get("backend") == "hip":                    # AMD, numbered as HIP numbers them (setup's KFD order)
-        if WIN:
-            hip_runtime_beside_exe(Path(cfg["exe"]).parent)   # #468 #461: also fixes a 0.1.34 install
-        amd = amd_gpus()
-        if isinstance(gpu, list):                      # --gpus: saved, this model runs on these cards from now on
-            cards = amd_parse_gpus(",".join(str(i) for i in gpu), amd)
-            built = (engine_archs_hip() or [])
-            miss = [x for x in cards if built and x["arch"] not in built]
-            if miss:
-                fail("the installed engine has no code for " + ", ".join(f"{x['name']} ({x['arch']})" for x in miss),
-                     "set it up for these cards: ./setup.sh --setup --backend hip --gpus " + ",".join(map(str, gpu)))
-            cfg["gpu"], cfg["gpus_asked"] = gpu, True
-            cfg["layer_split"] = layer_split or cfg.get("layer_split") or "auto"
-            split_budget(cfg, yes, True)               # #498: before it is saved (asks when the RAM is short, #737)
-            write_config(cfg_path, cfg)
-            gpu = None
-        elif gpu is not None:
-            cmd += ["--gpu", str(gpu)]
-        found = []
-        use = gpu if gpu is not None else cfg.get("gpu")
-        if isinstance(use, list):
-            byid = {x["index"]: x for x in amd}
-            ok("GPUs: " + " + ".join(gpu_name(byid[i]) if i in byid else f"GPU {i} (not found)" for i in use)
-               + f" together, AMD (layers split {cfg.get('layer_split') or 'auto'})")
-        else:
-            g = next((x for x in amd if x["index"] == (use if use is not None else x["index"])
-                      and amd_problem(x) is None), None)
-            if g is not None:
-                ok(f"GPU: {g['name']} ({g['vram_gb']:.0f} GB, AMD)")
-    else:
-        found = gpus()
-        global OLD_GPUS                                # Pascal / Volta: named on this start, or this model's CUDA 12 engine
-        OLD_GPUS = OLD_GPUS or old_gpus_opt_in(found, gpu if isinstance(gpu, list) else [gpu] if gpu is not None else
-                                               cfg.get("gpu") if isinstance(cfg.get("gpu"), list) else [cfg.get("gpu")],
-                                               12 if config_toolkit(cfg) == 12 else None)
-    if cfg.get("backend") == "hip":
-        pass
-    elif isinstance(gpu, list):                        # --gpus: saved, this model runs on these cards from now on
-        check_gpus(gpu, found, yes=yes, named=True)
-        cfg["gpu"], cfg["gpus_asked"] = gpu, True
-        cfg["layer_split"] = layer_split or cfg.get("layer_split") or "auto"
-        split_budget(cfg, yes, True)                   # #498: before it is saved (asks when the RAM is short, #737)
-        recommend_remote_expert_opt(cfg)
-        write_config(cfg_path, cfg)
-        gpu = None
-    elif gpu is not None:                              # --gpu N: this start only, on that card
-        check_gpus([gpu], found)
-        cmd += ["--gpu", str(gpu)]
-    else:
-        cfg = offer_together(cfg_path, cfg, yes)
-    use = gpu if gpu is not None else cfg.get("gpu")
-    # #364 #384: a resident low-RAM config on several GPUs; #498: a UD-Q4_K_XL config with its RAM budget (by hand)
-    if isinstance(use, list) and (split_mmap(cfg) | split_budget(cfg)):
-        write_config(cfg_path, cfg)
-    if cfg.get("backend") == "hip":
-        pass
-    elif isinstance(use, list):
-        check_gpus(use, found, "(chosen for this model) ", yes=True, named=True)
-        byid = {g["index"]: g for g in found}
-        cfg = ensure_engine_for([byid[i] for i in use], cfg_path, cfg, yes)
-        ok("GPUs: " + " + ".join(gpu_name(byid[i]) for i in use) + f" together (layers split {cfg.get('layer_split') or 'auto'})")
-    elif found:
-        g = next((x for x in found if x["index"] == use), None) if use is not None else max(
-            found, key=lambda x: (round(x["vram_gb"]), -x["index"]))
-        if g is not None:
-            cfg = ensure_engine_for([g], cfg_path, cfg, yes)
-            ok("GPU: " + gpu_name(g))
-    browser = open_browser and cfg.get("open_browser") is not False   # #609: "open_browser": false, --no-browser
-    if browser:
-        cmd.append("--open")
-    gb = 0.0
-    if "--native" in cfg["args"]:
-        try:
-            gb = Path(cfg["args"][cfg["args"].index("--native") + 1]).stat().st_size / 1e9
-        except (OSError, IndexError):
-            pass
-    say()
-    say("  " + "-" * 100)
-    size = f'about {gb:.0f} GB' if gb >= 1 else '34-55 GB'
-    a_ = cfg["args"]
-    if "--mmap-experts" in a_ and "--resident-budget-gib" not in a_ and "--resident-experts" not in a_:
-        # #505: the mapped low-RAM mode loads nothing into RAM up front (the server's narrator says the same)
-        say(f"  Starting {cfg.get('model_name', 'the model')}: it maps {size} of experts from the model files (the OS "
-            "file cache reads them).")
-    else:
-        say(f"  Starting {cfg.get('model_name', 'the model')}: it loads {size} into RAM and locks part of it for the "
-            "GPU.")
-    say("  While it does, YOUR PC CAN BE SLOW OR STOP RESPONDING FOR 1-3 MINUTES (longer the first time after a")
-    say("  restart). That is normal: please wait and don't close this window - " + (
-        "the browser opens when it is ready." if browser else "the server says when it is ready."))
-    say("  Later, closing this window stops the model.")
-    say("  " + "-" * 100)
-    for n, line in enumerate(textwrap.wrap(f"Settings ({cfg_path.name}): {settings_summary(cfg, port)}", 100,
-                                           break_on_hyphens=False)):   # #564: what this start uses
-        say(("  " if n == 0 else "    ") + line)
-    if not WIN and os.environ.get("STRATA_EXECV"):
-        # Replace this process instead of spawning a child (STRATA_EXECV=1): the server then runs in setup's
-        # place, so a stop signal sent to this process reaches the one that can answer the engine with QUIT.
-        # Normal Linux starts keep spawning the server as a child.
-        os.execve(cmd[0], cmd, {**os.environ, acquisition.ENV: "1"})
-    # the server and everything it starts are told, too: nothing in a running model installs or downloads
-    return subprocess.call(cmd, env={**os.environ, acquisition.ENV: "1"})
 
 
 # the draft subsets setup copied before (sha256): replaced by the current one, a subset made by hand is kept
@@ -6399,22 +6200,6 @@ def use_cuda12(cards, cfg_path: Path, cfg: dict, yes: bool) -> dict:
     write_config(cfg_path, cfg)
     ok(f"engine: {eng / EXE} (CUDA 12, experimental)")
     return cfg
-
-
-def write_run_script(model, cfg_path, port, open_browser=True):
-    """run-<model>.bat / .sh: the server with this config; `open_browser` False (#609: --no-browser) leaves --open out."""
-    serve = [sys.executable, str(ROOT / "serve" / "server.py"), "--engine", "strata", "--config", str(cfg_path),
-             "--port", str(port)] + (["--open"] if open_browser else [])
-    if WIN:
-        script = home() / f"run-{model.lower()}.bat"
-        script.write_text("@echo off\r\ntitle Strata " + model + "\r\ncd /d \"" + str(ROOT) + "\"\r\n" +
-                          " ".join(f'"{x}"' for x in serve) + "\r\nif errorlevel 1 pause\r\n", encoding="utf-8")
-    else:
-        script = home() / f"run-{model.lower()}.sh"
-        script.write_text("#!/bin/sh\ncd \"" + str(ROOT) + "\"\nexec " + " ".join(f'"{x}"' for x in serve) + "\n",
-                          encoding="utf-8")
-        script.chmod(0o755)
-    return script
 
 
 # ------------------------------------------------------------------------------------------------ the rope config
@@ -6788,7 +6573,7 @@ def install_own_path(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopte
             env=dict(os.environ, STRATA_GGUF_PY=str(llama / "gguf-py")))
     ok(f"tokenizer: {pack / 'tokenizer'}")
 
-    step(7, "writing the start script")
+    step(7, "writing the run config")
     args = ["--native", str(gguf), "--max-context", str(ctx), "--prefill", "auto", "--mtp", str(fam["mtp"])]
     if a.vram_reserve_mib is not None:             # VRAM left free for other programs: the experts take that much less
         vram = gpu.get("vram_gb", 0.0)
@@ -6809,8 +6594,6 @@ def install_own_path(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopte
         cfg["host"] = a.host
     if a.api_key:
         cfg["api_key"] = a.api_key
-    if a.browser is not None:
-        cfg["open_browser"] = a.browser
     cfg["args"] = recommend_pool_workers(cfg["args"])   # --pool-workers: this engine path's CPU expert threads too
     for line in pool_workers_note(cfg["args"]):
         warn(line)
@@ -6838,27 +6621,35 @@ def install_own_path(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopte
             cfg["parallel"] = 1
             ok("parallel requests: one at a time (--parallel 1)")
     write_setup_config(cfg_path, cfg, adopted if adopted is not None and adopted.name == cfg_path.name else None, explicit_args(a))
-    script = write_run_script(tag, cfg_path, port, cfg.get("open_browser") is not False)
-    ok(f"start script: {script.name}")
-    say()
-    say("All set.")
-    say(f"  API (OpenAI):     http://127.0.0.1:{port}/v1   (any API key; model name: anything)")
-    say(f"  API (Anthropic):  http://127.0.0.1:{port}/v1/messages")
-    say(f"  Next time:        just run {'START-HERE.bat' if WIN else './setup.sh'} (or {script.name}) - it starts right away")
+    ok(f"run config: {cfg_path.name}")
+    print_start_lines(cfg_path, port)
     if vision != "none":
         say("  Images:           send them in the chat page, in chat.py (/image <path>) or over the API")
     if par is None and not par_said:                   # the opt-in, said once (nothing changes)
         for line in own_path_parallel_note(None, fam, model, vram_gb, ctx):
             say("  " + line)
-    if a.no_start:
-        return 0
-    return start(cfg_path, port)
+    return 0
+
+
+def print_start_lines(cfg_path: Path, port: int) -> None:
+    """Setup installs, it does not start: say how the server is started with this config."""
+    py = ".venv\\Scripts\\python" if WIN else ".venv/bin/python"
+    shown = cfg_path
+    try:                                               # the command is run from the Strata folder
+        shown = cfg_path.relative_to(ROOT)
+    except ValueError:
+        pass
+    say()
+    say("All set.")
+    say("  Start the server with:")
+    say(f"    {py} serve/server.py --engine strata --config {shown} --port {port}")
+    say(f"  (API: http://127.0.0.1:{port}/v1, any API key; the run config is {shown})")
 
 
 def preview_family(a) -> int:
     """--family qwen36: a family setup knows but the engine does not run yet (PREVIEW_FAMILIES).  Downloads the chosen
     size (pinned revision, size and SHA-256 checked) and, with --vision, the image encoder - and says plainly that
-    Strata cannot start it yet.  Nothing is configured: no engine, no pack, no start script."""
+    Strata cannot start it yet.  Nothing is configured: no engine, no pack, no run config."""
     fam = PREVIEW_FAMILIES[a.family]
     names = list(fam["models"])
     say()
@@ -6996,11 +6787,6 @@ def main() -> int:
     ap.add_argument("--api-key", default=os.environ.get("STRATA_API_KEY") or None,
                     help="require this key from clients (recommended with --host 0.0.0.0); several keys: key1,key2; "
                          "STRATA_API_KEY is the default")
-    ap.add_argument("--no-browser", dest="browser", action="store_false", default=None,
-                    help="do not open the chat page in the browser when the model is ready (for a harness or an app "
-                         "that uses the API; remembered for this model, also in run-<model>.bat/.sh)")
-    ap.add_argument("--browser", dest="browser", action="store_true",
-                    help="open the chat page again when the model is ready (the default; undoes --no-browser)")
     ap.add_argument("--data-dir", help="where the model files go (~70-120 GB): default Strata-data next to this folder, "
                                        "remembered for every Strata folder on this PC")
     ap.add_argument("--move-data", action="store_true",
@@ -7013,7 +6799,6 @@ def main() -> int:
                                        "<name>-00001-of-0000N.gguf ... -0000N-of-0000N.gguf)")
     ap.add_argument("--yes", action="store_true", help="accept the recommended answers")
     ap.add_argument("--setup", action="store_true", help="install another model or change settings")
-    ap.add_argument("--no-start", action="store_true", help="install only, do not start the model")
     ap.add_argument("--restamp", action="store_true",
                     help="rewrite engine/BUILD.json from this source tree, after replacing the engine binary by hand")
     ap.add_argument("--source", choices=SOURCES, default=None,
@@ -7029,7 +6814,7 @@ def main() -> int:
                          "Volta). 12 also runs with an older driver (Windows 528+, Linux 525+). docs/OLDER_GPUS.md")
     ap.add_argument("--check", action="store_true", help="only check this PC and exit")
     ap.add_argument("--calibrate", action="store_true",
-                    help="tune the engine's settings for this PC (about 15-30 minutes, longer on a slow card), then start the model")
+                    help="tune the engine's settings for this PC (about 15-30 minutes, longer on a slow card)")
     ap.add_argument("--draft-vocab", choices=list(DRAFT_VOCABS),
                     help="the draft layer's tokens: cjk = with Chinese, Japanese and Korean (default), en = English "
                          "and code only (~110 MiB less VRAM, English answers 1-2%% faster), cyrillic = English, code "
@@ -7114,7 +6899,7 @@ def main() -> int:
     # A plain start of an installed model finds everything where it already is: it creates, moves and copies nothing
     # (the model paths are in the run config; the data folder is the one settings.json remembers).  Setting up, checking,
     # tuning and updating look for and gather the model files (data_folder).
-    plain_start = bool(have) and not (a.setup or a.model or a.family or a.check or a.no_start
+    plain_start = bool(have) and not (a.setup or a.model or a.family or a.check
                                       or a.calibrate or a.data_dir)
     models_dir_given = a.models_dir is not None
     data, elsewhere = data_folder_in_place() if plain_start else data_folder_for(a)   # the model files
@@ -7125,8 +6910,8 @@ def main() -> int:
     if a.restamp:                                      # a hand-swapped engine: make its stamp true again
         return restamp_engine(12 if a.cuda == "12" else 13)
 
-    # ---- 0. already installed: just start it
-    explicit = a.setup or a.model or a.family or a.check or a.no_start
+    # ---- 0. already installed: setup installs, it does not start
+    explicit = a.setup or a.model or a.family or a.check
     adopted = None                                     # #629: the earlier install this copy is set up like
     if not have and not explicit:                      # a new copy of Strata (an update unzipped elsewhere): set it
         prev = previous_config(elsewhere, load_settings())   # up like the last one, from the files already here
@@ -7153,10 +6938,6 @@ def main() -> int:
                     a.gpu = a.gpu if a.gpu is not None else ch.get("gpu")
                 a.yes = True
     global GPU_PICK, OLD_GPUS
-    # starting an installed model: --gpus 0,2 (or all) saves those cards for it and starts on them (it used to start
-    # on the first one alone unless given with --setup), --gpu N runs this start on one card; neither: the saved
-    # choice, and asked once when the PC has cards that could share the model
-    run_gpu = start_gpus(a.gpus) or a.gpu
     port = a.port or 8080                              # a new install's port (issue #32: --port for an existing one)
     if a.calibrate and (a.setup or a.check or not have):    # #2036: said, not dropped
         why = ("--setup" if a.setup else "--check" if a.check else "no model is installed yet")
@@ -7175,27 +6956,24 @@ def main() -> int:
             for i, c in enumerate(have, 1):
                 say(f"  {i}) {json.loads(c.read_text(encoding='utf-8-sig')).get('model_name', c.stem)}")
             pick_cfg = have[int(ask("Tune which one?", [str(i) for i in range(1, len(have) + 1)], "1", a.yes)) - 1]
-        if not calibrate_config(pick_cfg):             # #447: said again where it is not lost above the start
+        if not calibrate_config(pick_cfg):             # #447: said again, it is not lost below
             say()
-            warn("this PC is NOT tuned: the tuning failed (the reason is above); the model "
-                 + ("keeps" if a.no_start else "starts with") + " the default settings")
-        return 0 if a.no_start else start(pick_cfg, a.port, run_gpu, yes=a.yes, layer_split=a.layer_split,
-                     keep={"host": a.host, "api_key": a.api_key, "draft_vocab": a.draft_vocab,
-                           "vram_reserve_mib": a.vram_reserve_mib, "open_browser": a.browser})
-    if have and not (a.setup or a.model or a.family or a.check or a.no_start):
+            warn("this PC is NOT tuned: the tuning failed (the reason is above); the model keeps the default settings")
+        return 0
+    if have and not (a.setup or a.model or a.family or a.check):
         if len(have) == 1:
-            return start(have[0], a.port, run_gpu, yes=a.yes, layer_split=a.layer_split,
-                     keep={"host": a.host, "api_key": a.api_key, "draft_vocab": a.draft_vocab,
-                           "vram_reserve_mib": a.vram_reserve_mib, "open_browser": a.browser})
+            cfg = have[0]
+            print_start_lines(cfg, a.port or json.loads(cfg.read_text(encoding="utf-8-sig")).get("port", 8080))
+            return 0
         say()
         for i, c in enumerate(have, 1):
             say(f"  {i}) {json.loads(c.read_text(encoding='utf-8-sig')).get('model_name', c.stem)}")
         say(f"  {len(have) + 1}) install another model / change settings")
         pick = int(ask("Which one?", [str(i) for i in range(1, len(have) + 2)], "1", a.yes))
         if pick <= len(have):
-            return start(have[pick - 1], a.port, run_gpu, yes=a.yes, layer_split=a.layer_split,
-                     keep={"host": a.host, "api_key": a.api_key, "draft_vocab": a.draft_vocab,
-                           "vram_reserve_mib": a.vram_reserve_mib, "open_browser": a.browser})
+            cfg = have[pick - 1]
+            print_start_lines(cfg, a.port or json.loads(cfg.read_text(encoding="utf-8-sig")).get("port", 8080))
+            return 0
         data, elsewhere = data_folder_for(a)      # "install another model": now the model files are gathered
         roots = [data, *elsewhere]
         if not models_dir_given:
@@ -7397,7 +7175,8 @@ def main() -> int:
             say(f"\nThis PC cannot run Strata yet: no model size fits {ram:.0f} GB of RAM (the smallest needs about "
                 f"{need} GB). --model NAME --yes installs one anyway, slowly.")
             return 1
-        say("\nThis PC can run Strata. Run it again without --check to install.")
+        say("\nThis PC can run Strata." + (" Run setup without --check to set up another model; the server starts with "
+            "serve/server.py and the run config." if have else " Run it again without --check to install."))
         return 0
 
     # ---- 2. the questions
@@ -7533,7 +7312,7 @@ def main() -> int:
     ok(f"size: {model}")
     if MODELS[model].get("license"):                   # the ready-made packs: each size has its own license
         say(f"  Its license: {MODELS[model]['license']}")
-    tag = fam["tag"] + model                           # names of the pack, config and start script
+    tag = fam["tag"] + model                           # names of the pack and its config
     small = min(x["vram_gb"] for x in chosen)         # each card keeps its layers' KV of the whole context
     rec_ctx = 32768 if small < 14 else 65536 if small < 20 else 131072
     if budget is not None:                             # UD-Q4_K_XL: every GB of KV is a GB fewer of cached experts
@@ -7887,8 +7666,8 @@ def main() -> int:
     for line in draft_vocab_note(gpu.get("vram_gb", 0.0), draft_vocab):   # #474: a recommendation, nothing changes
         say("  " + line)
 
-    # ---- 7. the start script
-    step(7, "writing the start script")
+    # ---- 7. the run config
+    step(7, "writing the run config")
     sys.path.insert(0, str(ROOT / "tools"))
     from gguf_reader import GGUFFile                   # the PLE table's shard: shard 2 (original) or 1 (Swift)
     if ready:   # the dense GGUF as --native and --native-dense-gguf (--native alone would look for a second shard),
@@ -8160,8 +7939,6 @@ def main() -> int:
         cfg["api_key"] = a.api_key
     if draft_vocab:
         cfg["draft_vocab"] = draft_vocab
-    if a.browser is not None:                          # #609: only when given (else an earlier choice is carried over)
-        cfg["open_browser"] = a.browser
     if a.mtp is not None:                              # written only when given (else an earlier choice is carried over)
         if a.mtp == "off":
             cfg["mtp"] = False
@@ -8215,24 +7992,12 @@ def main() -> int:
     for line in bench_tips(cfg["args"], cfg.get("env"), ram, MODELS[model]["ram_gb"], gpu.get("vram_gb", 0.0), vision, WIN):
         say("  " + line)
     write_setup_config(cfg_path, cfg, adopted if adopted is not None and adopted.name == cfg_path.name else None, explicit_args(a))
-    script = write_run_script(tag, cfg_path, port, cfg.get("open_browser") is not False)
-    # offered only when someone answers: --yes installs and adopted earlier installs are not held up by it
-    if cal is None and not hip and not a.no_start and not a.yes and ask(
-            "Tune Strata for this PC now? It measures a few engine settings (about 15-30 minutes, longer on a slow card; the PC is busy "
-            "meanwhile; later: START-HERE --calibrate)", ["y", "n"], "y", a.yes) == "y":
-        tuned = calibrate_config(cfg_path)
-    else:
-        tuned = None                                   # not asked for: nothing to repeat below
-    ok(f"start script: {script.name}")
-
-    say()
-    say("All set.")
-    say(f"  API (OpenAI):     http://127.0.0.1:{port}/v1   (any API key; model name: anything)")
-    say(f"  API (Anthropic):  http://127.0.0.1:{port}/v1/messages")
+    ok(f"run config: {cfg_path.name}")
+    # the install never starts anything: the tuning is a separate step (setup --calibrate), it runs the engine
+    # for 15-30 minutes and is only wanted when asked for
     if a.host and a.host not in ("127.0.0.1", "localhost"):
         say(f"  Other devices:    the server window prints this PC's address (http://<IP>:{port}/)"
             + ("" if a.api_key else " - no API key set: anyone on your network can use it"))
-    say(f"  Next time:        just run {'START-HERE.bat' if WIN else './setup.sh'} (or {script.name}) - it starts right away")
     if vision != "none":
         say("  Images:           send them in the chat page, in chat.py (/image <path>) or over the API")
     if cfg.get("images"):
@@ -8241,12 +8006,8 @@ def main() -> int:
         for line in parallel_note(None, [g.get("vram_gb", 0.0) for g in chosen], MODELS[model]["arena_gb"], ctx, kv,
                                   "--kv-resident" in cfg["args"]):
             say("  " + line)
-    if tuned is False:                                 # #447: a failed tuning is repeated here, not only above
-        say("  Tuning:           FAILED (the reason is above): the default settings stay - "
-            f"{'START-HERE.bat' if WIN else './setup.sh'} --calibrate tries again")
-    if a.no_start:
-        return 0
-    return start(cfg_path, port)
+    print_start_lines(cfg_path, port)
+    return 0
 
 
 if __name__ == "__main__":

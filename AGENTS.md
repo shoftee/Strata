@@ -15,7 +15,8 @@ or an Apple Silicon Mac. Version 0.2.3, engine 0.1.48. It has two parts:
 ## Installing Strata for a user
 
 1. Clone the repository and run it without questions. The first run installs what it needs, downloads the model
-   (tens of GB) and the engine for this card, and starts serving; a later run just starts it.
+   (tens of GB) and the engine for this card, and writes the run config; it does not start the server - that is the
+   printed `serve/server.py` command.
 
    ```sh
    ./setup.sh --yes                    # Linux and Mac

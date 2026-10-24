@@ -1,5 +1,6 @@
 @echo off
-rem Strata for Windows: the first run installs everything and starts the model; later runs just start it.
+rem Strata for Windows: it installs everything and writes the run config; it does not start the model (the server
+rem runs from your own command or service).  Reruns only repair what changed.
 rem Needs only an NVIDIA or AMD graphics driver. Python is installed for your user account if it is missing (no admin needed).
 setlocal
 rem Python reads and writes text as UTF-8, not in the Windows code page (cp1251, cp866, ...): a folder or user name with Cyrillic or other letters stays intact (#3202).

@@ -30,7 +30,7 @@ REPO = "unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
 def args(**kw):
     base = dict(family="qwen36", model=None, check=False, yes=True, vision=None, models_dir=None, gguf_dir=None,
                 context=None, rope_scaling=None, rope_scale=None, kv=None, resident_budget_gib=None, low_ram="auto",
-                vram_reserve_mib=None, host=None, api_key=None, browser=None, no_start=True, data_dir=None, gpu=None)
+                vram_reserve_mib=None, host=None, api_key=None, data_dir=None, gpu=None)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -114,7 +114,6 @@ class InstallOwnPath(unittest.TestCase):
                    mock.patch.object(setup, "run", lambda cmd, **k: self.calls.append(("run", cmd))),
                    mock.patch.object(setup, "data_folder", lambda d, *a, **k: (self.root / "data", [])),
                    mock.patch.object(setup, "write_setup_config", write_cfg),
-                   mock.patch.object(setup, "write_run_script", lambda tag, p, port, o=True: self.root / f"run-{tag}.sh"),
                    mock.patch.object(setup, "recommend_pool_workers", lambda a: a),
                    mock.patch.object(setup, "ROOT", self.root)]
         for p in patches:
@@ -333,7 +332,6 @@ class InstallOwnPath(unittest.TestCase):
         ch = setup.choices_from_config(p)
         self.assertEqual((ch["family"], ch["model"], ch["context"]), ("qwen36", "UD-Q6_K_XL", 65536))
         self.assertEqual(ch["vision"], "cpu")                  # 16 GB NVIDIA, the default answer: the CPU encoder under 24 GB
-        self.assertTrue(setup.own_path_config(self.cfg))
         self.assertEqual(setup.calibration_targets([p], None, None), [])   # the tuning is Flash-Next's
 
 

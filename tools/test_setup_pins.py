@@ -203,7 +203,7 @@ class HuggingFacePins(unittest.TestCase):
         from test_setup_golden import PROFILES, install
         ram, found = PROFILES["96GB-1x16GB"]
         with mock.patch.dict(setup.os.environ, {"HF_ENDPOINT": "https://hf-mirror.com"}):
-            code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "IQ3_XXS", "--no-start"])
+            code, out, cfg, _ = install(ram, found, ["--family", "qwen", "--model", "IQ3_XXS"])
         self.assertEqual(code, 0)
         text = out.replace("\\", "/")
         self.assertRegex(text, r"The model files go in .*/models/IQ3_XXS")

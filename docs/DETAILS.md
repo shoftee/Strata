@@ -575,8 +575,8 @@ no PCIe link. The engine's own VRAM figures are in its log.
 `http://127.0.0.1:8080/?q=your question` opens it with a new chat already asking. The API is at
 `http://127.0.0.1:8080/v1` for your apps.
 
-**Every time after that**, `START-HERE.bat` just starts the model (30-90 s to load 34-43 GB into RAM). Nothing is
-downloaded again. Closing the window stops the model.
+**Every time after that**, start the server with the command setup printed (30-90 s to load 34-43 GB into RAM);
+closing its window stops the model. `START-HERE.bat` is only for changing something - nothing is downloaded again.
 
 ```
 START-HERE.bat --setup                          install another model, or change context / images
@@ -586,10 +586,11 @@ START-HERE.bat --gguf-dir D:\models\IQ2_XS       use GGUF files you already have
 START-HERE.bat --data-dir E:\Strata-data         keep the model files somewhere else
 START-HERE.bat --port 8081                      another port
 START-HERE.bat --gpu 1                          another GPU (numbered as nvidia-smi; setup picks the one with the most VRAM)
-START-HERE.bat --calibrate                      tune the engine for this PC (about 15-30 minutes, longer on a slow card), then start
+START-HERE.bat --calibrate                      tune the engine for this PC (about 15-30 minutes, longer on a slow card)
 ```
 
-With more than one model installed, it asks which one to start. `run-<model>.bat` starts a model directly.
+With more than one model installed, it asks which one you want and prints that model's start command. Every model
+starts directly with `serve/server.py` and its run config.
 
 **Tuning for your PC (`--calibrate`, engine 0.1.19).** These engine settings depend on the PC more than on the model:
 - the share of the experts missing from VRAM that are copied to the GPU instead of computed by the CPU
@@ -688,8 +689,9 @@ slowly, the engine prints a hint under its `loaded ... GiB at ...` line naming t
 ```
 
 The same questions, the same automatic install (it uses `sudo apt` for Python and, only if it has to compile,
-for the build tools), and the same start: `http://127.0.0.1:8080`. Later runs of `./setup.sh` (or `./run-<model>.sh`)
-start the model directly. Options as on Windows (`./setup.sh --setup`, `--model Q2_0 --yes`, `--gguf-dir /data/Q2_0`).
+for the build tools), and the same ending: it writes the run config and prints the start command; the server answers
+on `http://127.0.0.1:8080`. Later runs of `./setup.sh` change or repair what you ask for. Options as on Windows
+(`./setup.sh --setup`, `--model Q2_0 --yes`, `--gguf-dir /data/Q2_0`).
 Terminal chat: `.venv/bin/python chat.py`.
 Building from git, trying a pull request, the monitor from a checkout: [INSTALL.md](INSTALL.md#build-from-git-on-linux-to-try-a-pull-request-or-change-the-code).
 
@@ -1687,7 +1689,7 @@ them. Setup uses one rule for the reader: the **CPU reader under 24 GB** of grap
 taken from the card's memory, so the experts keep their room) and the **graphics card's reader from 24 GB**, on NVIDIA and AMD
 cards; a Mac reads on its GPU (Metal) whatever its memory. You can switch pictures off (`--vision no`) or pick the reader per model
 (`--vision gpu` or `--vision cpu`). The setup downloads the encoder and puts a small helper (`strata-vision`, from llama.cpp's
-`mtmd` library) beside the engine; it adds it to your start script. Nothing else changes. Where a reader is missing, pictures
+`mtmd` library) beside the engine; it adds it to the run config. Nothing else changes. Where a reader is missing, pictures
 stay off and the screen says so: the Intel Arc engine has none yet. On AMD the card's reader is `strata-vision-hip`, a second program in the engine package; if it cannot start, the server
 starts the CPU reader by itself and prints one line ([AMD_HIP.md](AMD_HIP.md)).
 

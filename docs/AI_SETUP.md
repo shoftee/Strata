@@ -100,9 +100,12 @@ setup's flag names (they are not case sensitive):
 ## 4. Set up, without questions
 
 ```
-Windows:  START-HERE.bat --yes --family qwen --model IQ2_XS --vision yes --no-start
-Linux:    ./setup.sh --yes --family qwen --model IQ2_XS --vision yes --no-start
+Windows:  START-HERE.bat --yes --family qwen --model IQ2_XS --vision yes
+Linux:    ./setup.sh --yes --family qwen --model IQ2_XS --vision yes
 ```
+
+Setup only installs: it writes the run config, prints the start command and returns. It never starts the server,
+so your shell comes back when the install is done.
 
 The flags (all of them: `START-HERE.bat --help`, `./setup.sh --help`):
 
@@ -121,14 +124,12 @@ The flags (all of them: `START-HERE.bat --help`, `./setup.sh --help`):
 | `--port N` | the server's port (default: the one the install was set up with, 8080 for a new one) |
 | `--host H --api-key K` | listen beyond this PC; keep a key when you do |
 | `--source auto\|modelscope\|huggingface` | where the model files come from |
-| `--no-start` | install only, do not start the server |
 | `--setup` | install another model or change the settings of an installed one |
 | `--check` | only check this PC and exit |
-| `--no-browser` | do not open the chat page in the browser when the model is ready |
 
 Notes:
-- **`--no-start` is recommended for agents.** Without it setup starts the server in the foreground and keeps your shell
-  until the model stops; with it, setup installs everything and prints the start script it wrote (step 6).
+- **Setup only installs** - it does not start anything, and your shell is yours again when it is done. Start the
+  server yourself, in the background, as in section 6.
 - **`--check` first** if you want to see what setup found about this PC before it installs anything.
 - **Setup always compiles the engine** for the card in this checkout, so a card that is not on the list in step 1 is
   refused before the model download: there is nothing to fall back to.
@@ -153,19 +154,14 @@ Notes:
 
 ## 6. Start it and check that it is serving
 
-Setup wrote a start script and printed its name (`start script: run-iq2_xs.bat`). The name is the family tag plus the
-size, lower case: `run-iq2_xs`, `run-swift-iq2_xs`, `run-coder-iq1_m`, `run-unsloth-ud-iq4_xs`. Start it the way the
-user will, and keep it out of your own shell:
+Setup printed the start command (`Start the server with: ...`): `serve/server.py` with the run config it wrote. The
+config is named for the family tag plus the size, lower case: `strata-iq2_xs.json`, `strata-swift-iq2_xs.json`,
+`strata-coder-iq1_m.json`, `strata-unsloth-ud-iq4_xs.json`. Start it the way the user will, and keep it out of your
+own shell:
 
 ```
-Windows (PowerShell):  Start-Process -FilePath ".\run-iq2_xs.bat"            (opens its own window)
-Linux:                 nohup ./run-iq2_xs.sh > strata-server.out 2>&1 &
-```
-
-The same server, started by hand from the run config setup wrote (`strata-<model>.json`):
-
-```
-.venv/bin/python serve/server.py --engine strata --config strata-iq2_xs.json --port 8080
+Windows (PowerShell):  Start-Process -FilePath ".venv\Scripts\python.exe" -ArgumentList "serve\server.py", "--engine", "strata", "--config", "strata-iq2_xs.json", "--port", "8080"
+Linux:                 nohup .venv/bin/python serve/server.py --engine strata --config strata-iq2_xs.json --port 8080 > strata-server.out 2>&1 &
 ```
 
 The engine log is `strata-<model>.log` in the Strata folder. To stop the model, close the window (or end the process);

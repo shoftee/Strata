@@ -108,8 +108,8 @@ START-HERE.bat --yes            # Windows, from a command prompt in this folder
 ```
 
 The first run installs the Python packages, compiles the engine for your card from this source, downloads
-the model (tens of GB) and starts serving; it prints the addresses when the model is
-up, and closing that window stops it. A later run just starts the model again.
+the model (tens of GB) and writes the run config; it prints the start command. Starting the server that way prints
+the addresses when the model is up, and closing that window stops it; run the same command again to serve again.
 
 The other route builds the engine yourself. It is a normal CMake project, and `docs/INSTALL.md` gives the
 full line for each card family; the short form for NVIDIA is:

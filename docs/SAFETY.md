@@ -80,7 +80,7 @@ That is the full list found in the code. Some details:
 - On Linux it uses `sudo apt` (or dnf or pacman) for Python with venv when it is missing, and for the build tools when it
   has to compile an engine. It says what it installs, and it never runs without telling you.
 - Everything else stays inside the Strata folder: `.venv/` (Python and its packages), `engine/`, `third_party/`, the build
-  folders, the run config `strata-<model>.json`, the start script `run-<model>.sh` / `.bat` and the log
+  folders, the run config `strata-<model>.json` and the log
   `strata-<model>.log`. The model files go to `Strata-data` next to it, or where `--data-dir` puts them.
 - It does not install a service, does not register anything to run at logon, and does not open a firewall port. On Windows
   the firewall may ask you once when the server starts listening beyond `127.0.0.1`.
